@@ -83,13 +83,15 @@ function registerPromotionInfractionCommand(client, config) {
             const lines = rawData.split('\n').filter(line => line.trim() !== '');
 
             const results = [];
-            const regex = /<@!?(\d+)>|@?([^•\n]+)\s*•\s*(?:(\d+)\s*hours?)?\s*,?\s*(?:(\d+)\s*minutes?)?\s*,?\s*(?:(\d+)\s*seconds?)?/i;
+
+            // Updated regex to capture both mentions and times properly
+            const regex = /(?:<@!?(\d+)>|@?([^•\n]+))\s*•\s*(?:(\d+)\s*hours?)?(?:,\s*)?(?:(\d+)\s*minutes?)?(?:,\s*)?(?:(\d+)\s*seconds?)?/i;
 
             for (const line of lines) {
                 const match = regex.exec(line);
                 if (!match) continue;
 
-                let userId = match[1];
+                const userId = match[1];
                 let name = match[2]?.trim();
                 const h = parseInt(match[3]) || 0;
                 const m = parseInt(match[4]) || 0;
@@ -101,7 +103,6 @@ function registerPromotionInfractionCommand(client, config) {
                 if (userId) {
                     member = await interaction.guild.members.fetch(userId).catch(() => null);
                 } else if (name) {
-                    // Try to find by nickname, username, or global name
                     name = name.replace(/^@/, '').trim().toLowerCase();
                     member = interaction.guild.members.cache.find(m =>
                         m.displayName.toLowerCase().includes(name) ||
