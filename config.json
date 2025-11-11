@@ -1,6 +1,6 @@
 {
-  "GUILD_ID": "927880654165774386",
-  "DISCORD_CLIENT_ID": "1339543150418595870",
+  "GUILD_ID": "1437715430545428553",
+  "DISCORD_CLIENT_ID": "1437717705628188773",
 
   "EXAM_SETTINGS": {
     "TOTAL_QUESTIONS": 20,
@@ -8,115 +8,70 @@
   },
 
   "CHANNELS": {
-    "BUTTON": "1430967155628708003",
-    "LOGS": "1430969439595008071",
-    "RESULTS": "1259125811416662117",
-    "ARREST_LOGS": "1189586595016351756"
+    "BUTTON": "1437716170664050759",
+    "LOGS": "1437716208597205054",
+    "RESULTS": "1437716157334294548",
+    "ARREST_LOGS": "1437715989243629611"
   },
 
   "ROLES": {
-    "NEEDED_TO_START": "1430459151930101820",
+    "NEEDED_TO_START": "1437715794703421530",
     "ADD_ON_PASS": [
-      "928012520889929758",
-      "1355892612342743160"
+      "1437715795852398633",
+      "1437715785526018119"
     ],
     "REMOVE_ON_PASS": [
-      "1430459151930101820"
+      "1437715794703421530"
     ]
   },
 
   "COMMAND_ROLES": {
-    "LOG_ARREST_ROLE": "928455277609615450",
-    "AVAILABLE_CALLSIGNS_ROLE": "927886215649316974",
-    "AUTOROLE_ROLE": "927886215649316974",
-    "AUTOROLE_LOG_CHANNEL": "1431753387480973574"
+    "LOG_ARREST_ROLE": "1437715826634526821",
+    "AVAILABLE_CALLSIGNS_ROLE": "1437715613463089242",
+    "AUTOROLE_ROLE": "1437715613463089242",
+    "AUTOROLE_LOG_CHANNEL": "1437716075843293294"
   },
 
   "QUOTA_SETTINGS": {
-    "QUOTA_COMMAND_PERMISSION_ROLE": "927886215649316974",
+    "QUOTA_COMMAND_PERMISSION_ROLE": "1437715613463089242",
     "GRACE_PERIOD_MINUTES": 10,
     "STATUS_ROLES": {
-      "LEAVE_OF_ABSENCE_ID": "1040290003932156064",
-      "REDUCED_ACTIVITY_ID": "1238285526130364467",
-      "REDUCED_QUOTA_ID": "1405591971992699101"
+      "LEAVE_OF_ABSENCE_ID": "1437715619481911329",
+      "REDUCED_ACTIVITY_ID": "1437715622111871091",
+      "REDUCED_QUOTA_ID": "1437715621428068372"
     },
     "RANK_QUOTAS": [
       {
         "minQuotaMinutes": 180,
-        "rankRoles": ["927888242878058496"],
+        "rankRoles": ["1437715654303289389"],
         "rankName": "Field Agent Quota (3 hours)"
       },
       {
         "minQuotaMinutes": 150,
-        "rankRoles": ["927887334748348416"],
+        "rankRoles": ["1437715646174593035"],
         "rankName": "Supervisor Quota (2h 30m)"
       },
       {
         "minQuotaMinutes": 120,
-        "rankRoles": ["927886850255904810"],
+        "rankRoles": ["1437715641447485460"],
         "rankName": "Low Command Quota (2 hours)"
       }
     ],
     "PROMO_QUOTAS": [
       {
         "minQuotaMinutes": 300,
-        "rankRoles": ["927888242878058496"],
+        "rankRoles": ["1437715654303289389"],
         "rankName": "Field Agent Promotional Quota (5 hours)"
       },
       {
         "minQuotaMinutes": 270,
-        "rankRoles": ["927887334748348416"],
+        "rankRoles": ["1437715646174593035"],
         "rankName": "Supervisor Promotional Quota (4 hours 30 minutes)"
       },
       {
         "minQuotaMinutes": 240,
-        "rankRoles": ["927886850255904810"],
+        "rankRoles": ["1437715641447485460"],
         "rankName": "Low Command Promotional Quota (4 hours)"
-      }
-    ]
-  },
-
-  "AUTOROLE": {
-    "LEGEND": [
-      {
-        "callsigns": ["2H-06", "2H-07", "2H-08"],
-        "rolesGiven": ["DHS | Special Agent Commander"],
-        "rolesRemoved": ["DHS | Lead Special Agent"]
-      },
-      {
-        "callsigns": ["2H-09", "2H-10", "2H-11", "2H-12"],
-        "rolesGiven": ["DHS | Lead Special Agent", "『 Low Command 』"],
-        "rolesRemoved": ["DHS | Supervisory Agent In Charge", "『 Supervisor 』"]
-      },
-      {
-        "callsigns": ["3H-13", "3H-14", "3H-15", "3H-16", "3H-17"],
-        "rolesGiven": ["DHS | Supervisory Agent In Charge"],
-        "rolesRemoved": ["DHS | Supervisory Special Agent"]
-      },
-      {
-        "callsigns": ["4H-18", "4H-19", "4H-20", "4H-21", "4H-22"],
-        "rolesGiven": ["DHS | Supervisory Special Agent"],
-        "rolesRemoved": ["DHS | Assistant Supervisory Special Agent"]
-      },
-      {
-        "callsigns": ["5H-23", "5H-24", "5H-25", "5H-26", "5H-27", "5H-28", "5H-29"],
-        "rolesGiven": ["DHS | Assistant Supervisory Special Agent", "『 Supervisor 』"],
-        "rolesRemoved": ["DHS | Senior Special Agent", "『 Field Agent 』"]
-      },
-      {
-        "callsigns": ["6H-30", "6H-31", "6H-32", "6H-33", "6H-34", "6H-35", "6H-36", "6H-37", "6H-38"],
-        "rolesGiven": ["DHS | Senior Special Agent"],
-        "rolesRemoved": ["DHS | Special Agent In Charge"]
-      },
-      {
-        "callsigns": ["7H-39", "7H-40", "7H-41", "7H-42", "7H-43", "7H-44", "7H-45", "7H-46", "7H-47", "7H-48", "7H-49", "7H-50", "7H-51"],
-        "rolesGiven": ["DHS | Special Agent In Charge"],
-        "rolesRemoved": ["DHS | Special Agent"]
-      },
-      {
-        "callsigns": ["8H-52", "8H-53", "8H-54", "8H-55", "8H-56", "8H-57", "8H-58", "8H-59", "8H-60", "8H-61", "8H-62", "8H-63", "8H-64"],
-        "rolesGiven": ["DHS | Special Agent"],
-        "rolesRemoved": ["DHS | Probationary Special Agent"]
       }
     ]
   }
