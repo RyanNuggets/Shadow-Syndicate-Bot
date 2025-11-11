@@ -28,17 +28,14 @@ function registerPromotionInfractionCommand(client, config) {
                     .toJSON(),
                 GUILD_ID
             );
-            console.log(`Successfully registered /activityreport command to guild: ${GUILD_ID}.`);
+            console.log(`✅ Successfully registered /activityreport command to guild: ${GUILD_ID}.`);
         } catch (error) {
             console.error('❌ Failed to register /activityreport command:', error);
         }
     }
 
-    if (client.isReady()) {
-        registerCommand();
-    } else {
-        client.once('ready', registerCommand);
-    }
+    if (client.isReady()) registerCommand();
+    else client.once('ready', registerCommand);
 
     client.on('interactionCreate', async (interaction) => {
         if (!interaction.isChatInputCommand()) return;
@@ -58,7 +55,7 @@ function registerPromotionInfractionCommand(client, config) {
             .setLabel('Paste the shift data below:')
             .setStyle(TextInputStyle.Paragraph)
             .setRequired(true)
-            .setPlaceholder('<@962762745541955586> • 7 hours, 13 minutes, 56 seconds on shift • 0 moderations...');
+            .setPlaceholder('@ryannuggets3 • 7 hours, 13 minutes, 56 seconds on shift • 0 moderations...');
 
         const reductionInput = new TextInputBuilder()
             .setCustomId('reductionPercent')
@@ -66,8 +63,10 @@ function registerPromotionInfractionCommand(client, config) {
             .setStyle(TextInputStyle.Short)
             .setRequired(true);
 
-        modal.addComponents(new ActionRowBuilder().addComponents(dataInput));
-        modal.addComponents(new ActionRowBuilder().addComponents(reductionInput));
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(dataInput),
+            new ActionRowBuilder().addComponents(reductionInput)
+        );
 
         await interaction.showModal(modal);
     });
@@ -81,37 +80,48 @@ function registerPromotionInfractionCommand(client, config) {
         try {
             const rawData = interaction.fields.getTextInputValue('reportdata');
             const reductionPercent = parseFloat(interaction.fields.getTextInputValue('reductionPercent')) || 0;
-
-            const lines = rawData.split('\n');
-            const userIds = [];
-
-            for (const line of lines) {
-                const match = /<@!?(\d+)>/i.exec(line);
-                if (match) userIds.push(match[1]);
-            }
-
-            const membersMap = new Map();
-            await Promise.all(
-                userIds.map(async (id) => {
-                    const m = await interaction.guild.members.fetch(id).catch(() => null);
-                    if (m) membersMap.set(id, m);
-                })
-            );
+            const lines = rawData.split('\n').filter(line => line.trim() !== '');
 
             const results = [];
-            const regex = /<@!?(\d+)>\s*•\s*(?:(\d+)\s*hours?)?\s*,?\s*(?:(\d+)\s*minutes?)?\s*,?\s*(?:(\d+)\s*seconds?)?/i;
+            const regex = /<@!?(\d+)>|@?([^•\n]+)\s*•\s*(?:(\d+)\s*hours?)?\s*,?\s*(?:(\d+)\s*minutes?)?\s*,?\s*(?:(\d+)\s*seconds?)?/i;
 
             for (const line of lines) {
                 const match = regex.exec(line);
                 if (!match) continue;
 
-                const userId = match[1];
-                const h = parseInt(match[2]) || 0;
-                const m = parseInt(match[3]) || 0;
-                const s = parseInt(match[4]) || 0;
+                let userId = match[1];
+                let name = match[2]?.trim();
+                const h = parseInt(match[3]) || 0;
+                const m = parseInt(match[4]) || 0;
+                const s = parseInt(match[5]) || 0;
                 const totalMinutes = h * 60 + m + s / 60;
 
-                results.push({ userId, h, m, s, totalMinutes });
+                let member = null;
+
+                if (userId) {
+                    member = await interaction.guild.members.fetch(userId).catch(() => null);
+                } else if (name) {
+                    // Try to find by nickname, username, or global name
+                    name = name.replace(/^@/, '').trim().toLowerCase();
+                    member = interaction.guild.members.cache.find(m =>
+                        m.displayName.toLowerCase().includes(name) ||
+                        m.user.username.toLowerCase().includes(name) ||
+                        m.user.globalName?.toLowerCase().includes(name)
+                    );
+                }
+
+                if (!member) {
+                    console.warn(`⚠️ Could not find member for: ${line}`);
+                    continue;
+                }
+
+                results.push({
+                    member,
+                    h,
+                    m,
+                    s,
+                    totalMinutes
+                });
             }
 
             const promoMetQuota = [];
@@ -121,39 +131,36 @@ function registerPromotionInfractionCommand(client, config) {
             const gracePeriodMet = [];
 
             for (const entry of results) {
-                const member = membersMap.get(entry.userId);
-                if (!member) continue;
+                const member = entry.member;
 
+                // Exemptions
                 if (member.roles.cache.has(STATUS_ROLES.LEAVE_OF_ABSENCE_ID)) {
-                    exempted.push(`<@${entry.userId}> • Leave of Absence`);
+                    exempted.push(`${member} • Leave of Absence`);
                     continue;
                 }
                 if (member.roles.cache.has(STATUS_ROLES.REDUCED_QUOTA_ID)) {
-                    exempted.push(`<@${entry.userId}> • Reduced Quota`);
+                    exempted.push(`${member} • Reduced Quota`);
                     continue;
                 }
 
                 let quotaMinutes = null;
                 for (const rank of RANK_QUOTAS) {
-                    if (rank.rankRoles.some(roleId => member.roles.cache.has(roleId))) {
+                    if (rank.rankRoles.some(r => member.roles.cache.has(r))) {
                         quotaMinutes = rank.minQuotaMinutes;
                         break;
                     }
                 }
                 if (!quotaMinutes) continue;
 
-                // --- Apply AIP reduction or Reduced Activity (no stacking) ---
+                // --- AIP reduction / Reduced Activity ---
                 let aipReduction = 0;
                 if (member.roles.cache.has(AIP_ROLE_ID)) {
-                    // Identify rank category
                     if (RANK_QUOTAS[2].rankRoles.some(r => member.roles.cache.has(r))) aipReduction = AIP_REDUCTION.LOW_COMMAND;
                     else if (RANK_QUOTAS[1].rankRoles.some(r => member.roles.cache.has(r))) aipReduction = AIP_REDUCTION.SUPERVISOR;
                     else if (RANK_QUOTAS[0].rankRoles.some(r => member.roles.cache.has(r))) aipReduction = AIP_REDUCTION.PATROL;
                 }
 
-                // Apply the higher reduction (AIP vs Reduced Activity)
                 if (member.roles.cache.has(STATUS_ROLES.REDUCED_ACTIVITY_ID)) {
-                    // Reduced Activity halves the quota
                     const reducedActivityMinutes = quotaMinutes / 2;
                     const aipReducedMinutes = quotaMinutes - aipReduction;
                     quotaMinutes = Math.min(reducedActivityMinutes, aipReducedMinutes);
@@ -165,34 +172,36 @@ function registerPromotionInfractionCommand(client, config) {
 
                 let promoMinutes = null;
                 for (const rank of PROMO_QUOTAS) {
-                    if (rank.rankRoles.some(roleId => member.roles.cache.has(roleId))) {
+                    if (rank.rankRoles.some(r => member.roles.cache.has(r))) {
                         promoMinutes = rank.minQuotaMinutes;
                         break;
                     }
                 }
-
                 if (promoMinutes) promoMinutes *= (1 - reductionPercent / 100);
 
                 let countedAsPromo = false;
                 if (promoMinutes && entry.totalMinutes >= promoMinutes) {
-                    promoMetQuota.push(`<@${entry.userId}> • ${entry.h}h ${entry.m}m ${entry.s}s`);
+                    promoMetQuota.push(`${member} • ${entry.h}h ${entry.m}m ${entry.s}s`);
                     countedAsPromo = true;
                 }
 
                 if (!countedAsPromo) {
                     const diff = quotaMinutes - entry.totalMinutes;
                     if (diff <= 0) {
-                        metQuota.push(`<@${entry.userId}> • ${entry.h}h ${entry.m}m ${entry.s}s`);
+                        metQuota.push(`${member} • ${entry.h}h ${entry.m}m ${entry.s}s`);
                     } else if (diff > 0 && diff <= GRACE_PERIOD) {
-                        gracePeriodMet.push(`<@${entry.userId}> • ${entry.h}h ${entry.m}m ${entry.s}s`);
+                        gracePeriodMet.push(`${member} • ${entry.h}h ${entry.m}m ${entry.s}s`);
                     } else {
-                        notMetQuota.push(`<@${entry.userId}> • ${entry.h}h ${entry.m}m ${entry.s}s`);
+                        notMetQuota.push(`${member} • ${entry.h}h ${entry.m}m ${entry.s}s`);
                     }
                 }
             }
 
             const makeEmbed = (title, members) =>
-                new EmbedBuilder().setTitle(title).setColor(0x2F3136).setDescription(members.length ? members.join('\n') : 'None');
+                new EmbedBuilder()
+                    .setTitle(title)
+                    .setColor(0x2F3136)
+                    .setDescription(members.length ? members.join('\n') : 'None');
 
             const embeds = [
                 makeEmbed('Met Promotional Quota', promoMetQuota),
