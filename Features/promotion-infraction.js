@@ -1,1 +1,210 @@
+const {
+    SlashCommandBuilder,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+    ActionRowBuilder,
+    EmbedBuilder,
+    PermissionFlagsBits
+} = require('discord.js');
 
+function registerPromotionInfractionCommand(client, config) {
+    const GUILD_ID = config.GUILD_ID;
+    const HIGH_COMMAND_ROLE = config.QUOTA_SETTINGS.QUOTA_COMMAND_PERMISSION_ROLE;
+    const GRACE_PERIOD = config.QUOTA_SETTINGS.GRACE_PERIOD_MINUTES;
+    const STATUS_ROLES = config.QUOTA_SETTINGS.STATUS_ROLES;
+    const RANK_QUOTAS = config.QUOTA_SETTINGS.RANK_QUOTAS;
+    const PROMO_QUOTAS = config.QUOTA_SETTINGS.PROMO_QUOTAS;
+
+    async function registerCommand() {
+        try {
+            await client.application.commands.create(
+                new SlashCommandBuilder()
+                    .setName('activityreport')
+                    .setDescription('Submit an activity report for High Command.')
+                    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+                    .toJSON(),
+                GUILD_ID
+            );
+            console.log(`Successfully registered /activityreport command to guild: ${GUILD_ID}.`);
+        } catch (error) {
+            console.error('❌ Failed to register /activityreport command:', error);
+        }
+    }
+
+    if (client.isReady()) {
+        registerCommand();
+    } else {
+        client.once('ready', registerCommand);
+    }
+
+    client.on('interactionCreate', async (interaction) => {
+        if (!interaction.isChatInputCommand()) return;
+        if (interaction.commandName !== 'activityreport') return;
+
+        const member = await interaction.guild.members.fetch(interaction.user.id);
+        if (!member.roles.cache.has(HIGH_COMMAND_ROLE)) {
+            return interaction.reply({ content: '❌ You do not have permission to run this command.', ephemeral: true });
+        }
+
+        const modal = new ModalBuilder()
+            .setCustomId('activityreport_modal')
+            .setTitle('Activity Report Submission');
+
+        const dataInput = new TextInputBuilder()
+            .setCustomId('reportdata')
+            .setLabel('Paste the shift data below:')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+            .setPlaceholder('<@962762745541955586> • 7 hours, 13 minutes, 56 seconds on shift • 0 moderations...');
+
+        const reductionInput = new TextInputBuilder()
+            .setCustomId('reductionPercent')
+            .setLabel('Quota Reduction (Number Only)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true);
+
+        modal.addComponents(new ActionRowBuilder().addComponents(dataInput));
+        modal.addComponents(new ActionRowBuilder().addComponents(reductionInput));
+
+        await interaction.showModal(modal);
+    });
+
+    client.on('interactionCreate', async (interaction) => {
+        if (!interaction.isModalSubmit()) return;
+        if (interaction.customId !== 'activityreport_modal') return;
+
+        await interaction.deferReply({ ephemeral: false });
+
+        try {
+            const rawData = interaction.fields.getTextInputValue('reportdata');
+            const reductionPercent = parseFloat(interaction.fields.getTextInputValue('reductionPercent')) || 0;
+
+            const lines = rawData.split('\n');
+            const userIds = [];
+
+            // Collect all user IDs for bulk fetching
+            for (const line of lines) {
+                const match = /<@!?(\d+)>/i.exec(line);
+                if (match) userIds.push(match[1]);
+            }
+
+            // Bulk fetch members
+            const membersMap = new Map();
+            await Promise.all(
+                userIds.map(async (id) => {
+                    const m = await interaction.guild.members.fetch(id).catch(() => null);
+                    if (m) membersMap.set(id, m);
+                })
+            );
+
+            const results = [];
+            // Handles hours, minutes, seconds in any combination
+            const regex = /<@!?(\d+)>\s*•\s*(?:(\d+)\s*hours?)?\s*,?\s*(?:(\d+)\s*minutes?)?\s*,?\s*(?:(\d+)\s*seconds?)?/i;
+
+            for (const line of lines) {
+                const match = regex.exec(line);
+                if (!match) continue;
+
+                const userId = match[1];
+                const h = parseInt(match[2]) || 0;
+                const m = parseInt(match[3]) || 0;
+                const s = parseInt(match[4]) || 0;
+                const totalMinutes = h * 60 + m + s / 60;
+
+                results.push({ userId, h, m, s, totalMinutes });
+            }
+
+            const promoMetQuota = [];
+            const metQuota = [];
+            const notMetQuota = [];
+            const exempted = [];
+            const gracePeriodMet = [];
+
+            for (const entry of results) {
+                const member = membersMap.get(entry.userId);
+                if (!member) continue;
+
+                // Exempted
+                if (member.roles.cache.has(STATUS_ROLES.LEAVE_OF_ABSENCE_ID)) {
+                    exempted.push(`<@${entry.userId}> • Leave of Absence`);
+                    continue;
+                }
+                if (member.roles.cache.has(STATUS_ROLES.REDUCED_QUOTA_ID)) {
+                    exempted.push(`<@${entry.userId}> • Reduced Quota`);
+                    continue;
+                }
+
+                // Normal quota
+                let quotaMinutes = null;
+                for (const rank of RANK_QUOTAS) {
+                    if (rank.rankRoles.some(roleId => member.roles.cache.has(roleId))) {
+                        quotaMinutes = rank.minQuotaMinutes;
+                        break;
+                    }
+                }
+                if (!quotaMinutes) continue;
+
+                if (member.roles.cache.has(STATUS_ROLES.REDUCED_ACTIVITY_ID)) {
+                    quotaMinutes /= 2;
+                }
+                quotaMinutes *= (1 - reductionPercent / 100);
+
+                // Promotional quota
+                let promoMinutes = null;
+                for (const rank of PROMO_QUOTAS) {
+                    if (rank.rankRoles.some(roleId => member.roles.cache.has(roleId))) {
+                        promoMinutes = rank.minQuotaMinutes;
+                        break;
+                    }
+                }
+
+                if (promoMinutes) {
+                    promoMinutes *= (1 - reductionPercent / 100); // Apply reduction here
+                }
+
+                let countedAsPromo = false;
+                if (promoMinutes && entry.totalMinutes >= promoMinutes) {
+                    promoMetQuota.push(`<@${entry.userId}> • ${entry.h}h ${entry.m}m ${entry.s}s`);
+                    countedAsPromo = true;
+                }
+
+                // Only check normal quota if NOT promo
+                if (!countedAsPromo) {
+                    const diff = quotaMinutes - entry.totalMinutes;
+                    if (diff <= 0) {
+                        metQuota.push(`<@${entry.userId}> • ${entry.h}h ${entry.m}m ${entry.s}s`);
+                    } else if (diff > 0 && diff <= GRACE_PERIOD) {
+                        gracePeriodMet.push(`<@${entry.userId}> • ${entry.h}h ${entry.m}m ${entry.s}s`);
+                    } else {
+                        notMetQuota.push(`<@${entry.userId}> • ${entry.h}h ${entry.m}m ${entry.s}s`);
+                    }
+                }
+            }
+
+            const makeEmbed = (title, members) => {
+                return new EmbedBuilder()
+                    .setTitle(title)
+                    .setColor(0x2F3136)
+                    .setDescription(members.length ? members.join('\n') : 'None');
+            };
+
+            const embeds = [
+                makeEmbed('Met Promotional Quota', promoMetQuota),
+                makeEmbed('Met Quota', metQuota),
+                makeEmbed('Not Met Quota', notMetQuota),
+                makeEmbed('Exempted (Leave Of Absence / Reduced Quota)', exempted),
+                makeEmbed(`Grace Period Applied (≤${GRACE_PERIOD} min)`, gracePeriodMet)
+            ];
+
+            await interaction.channel.send({ embeds });
+            await interaction.editReply({ content: '✅ Activity report submitted and processed.' });
+
+        } catch (err) {
+            console.error('❌ Error processing activity report:', err);
+            await interaction.editReply({ content: '❌ Error processing activity report.' });
+        }
+    });
+}
+
+module.exports = { registerPromotionInfractionCommand };
