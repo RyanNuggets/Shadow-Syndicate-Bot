@@ -35,8 +35,7 @@ const promotionInfractionModule = require('./Features/promotion-infraction');
 const logArrestModule = require('./Features/logarrest');
 const availableCallsignsModule = require('./Features/availablecallsigns'); 
 const autoroleModule = require('./Features/autorole'); 
-const blsExamModule = require('./Features/blsexam'); // BLS Exam module
-const aotmModule = require('./Features/aotm'); // Agent of the Month module
+const blsExamModule = require('./Features/blsexam'); // Require the BLS Exam module
 
 client.once('ready', async () => {
     console.log(`Bot logged in as ${client.user.tag}!`);
@@ -48,7 +47,8 @@ client.once('ready', async () => {
         await logArrestModule.registerLogArrestCommand(client, config);
         await availableCallsignsModule.registerAvailableCallsignsCommand(client, config);
         await autoroleModule.registerAutoRoleCommand(client, config);
-        await aotmModule.registerAOTM(client, config); // <-- Added registration
+
+        // NOTE: BLS Exam event handlers are registered below, outside this block.
 
         console.log("✅ All feature modules initialized successfully.");
     } catch (err) {
@@ -56,8 +56,9 @@ client.once('ready', async () => {
     }
 });
 
-// --- Register BLS Exam event handlers (runs before login) ---
+// 🔑 CRITICAL FIX: Register event handlers *before* client.login
+// This ensures the client.once('ready', ...) listener inside blsexam.js is called
+// when the client connects, allowing the start button to post.
 blsExamModule.registerExamHandlers(client, config);
 
-// Login to Discord
 client.login(process.env.DISCORD_TOKEN);
