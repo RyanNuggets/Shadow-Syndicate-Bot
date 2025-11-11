@@ -40,6 +40,13 @@
       "REDUCED_ACTIVITY_ID": "1437715622111871091",
       "REDUCED_QUOTA_ID": "1437715621428068372"
     },
+  "AIP_ROLE_ID": "1437715722246688890",
+    "AIP_REDUCTION": {
+    "LOW_COMMAND": 20,
+    "SUPERVISOR": 30,
+    "PATROL": 40
+  },
+    
     "RANK_QUOTAS": [
       {
         "minQuotaMinutes": 180,
