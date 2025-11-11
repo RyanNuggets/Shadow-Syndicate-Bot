@@ -15,6 +15,8 @@ function registerPromotionInfractionCommand(client, config) {
     const STATUS_ROLES = config.QUOTA_SETTINGS.STATUS_ROLES;
     const RANK_QUOTAS = config.QUOTA_SETTINGS.RANK_QUOTAS;
     const PROMO_QUOTAS = config.QUOTA_SETTINGS.PROMO_QUOTAS;
+    const AIP_ROLE_ID = config.QUOTA_SETTINGS.AIP_ROLE_ID;
+    const AIP_REDUCTION = config.QUOTA_SETTINGS.AIP_REDUCTION;
 
     async function registerCommand() {
         try {
@@ -83,13 +85,11 @@ function registerPromotionInfractionCommand(client, config) {
             const lines = rawData.split('\n');
             const userIds = [];
 
-            // Collect all user IDs for bulk fetching
             for (const line of lines) {
                 const match = /<@!?(\d+)>/i.exec(line);
                 if (match) userIds.push(match[1]);
             }
 
-            // Bulk fetch members
             const membersMap = new Map();
             await Promise.all(
                 userIds.map(async (id) => {
@@ -99,7 +99,6 @@ function registerPromotionInfractionCommand(client, config) {
             );
 
             const results = [];
-            // Handles hours, minutes, seconds in any combination
             const regex = /<@!?(\d+)>\s*•\s*(?:(\d+)\s*hours?)?\s*,?\s*(?:(\d+)\s*minutes?)?\s*,?\s*(?:(\d+)\s*seconds?)?/i;
 
             for (const line of lines) {
@@ -125,7 +124,6 @@ function registerPromotionInfractionCommand(client, config) {
                 const member = membersMap.get(entry.userId);
                 if (!member) continue;
 
-                // Exempted
                 if (member.roles.cache.has(STATUS_ROLES.LEAVE_OF_ABSENCE_ID)) {
                     exempted.push(`<@${entry.userId}> • Leave of Absence`);
                     continue;
@@ -135,7 +133,6 @@ function registerPromotionInfractionCommand(client, config) {
                     continue;
                 }
 
-                // Normal quota
                 let quotaMinutes = null;
                 for (const rank of RANK_QUOTAS) {
                     if (rank.rankRoles.some(roleId => member.roles.cache.has(roleId))) {
@@ -145,12 +142,27 @@ function registerPromotionInfractionCommand(client, config) {
                 }
                 if (!quotaMinutes) continue;
 
-                if (member.roles.cache.has(STATUS_ROLES.REDUCED_ACTIVITY_ID)) {
-                    quotaMinutes /= 2;
+                // --- Apply AIP reduction or Reduced Activity (no stacking) ---
+                let aipReduction = 0;
+                if (member.roles.cache.has(AIP_ROLE_ID)) {
+                    // Identify rank category
+                    if (RANK_QUOTAS[2].rankRoles.some(r => member.roles.cache.has(r))) aipReduction = AIP_REDUCTION.LOW_COMMAND;
+                    else if (RANK_QUOTAS[1].rankRoles.some(r => member.roles.cache.has(r))) aipReduction = AIP_REDUCTION.SUPERVISOR;
+                    else if (RANK_QUOTAS[0].rankRoles.some(r => member.roles.cache.has(r))) aipReduction = AIP_REDUCTION.PATROL;
                 }
+
+                // Apply the higher reduction (AIP vs Reduced Activity)
+                if (member.roles.cache.has(STATUS_ROLES.REDUCED_ACTIVITY_ID)) {
+                    // Reduced Activity halves the quota
+                    const reducedActivityMinutes = quotaMinutes / 2;
+                    const aipReducedMinutes = quotaMinutes - aipReduction;
+                    quotaMinutes = Math.min(reducedActivityMinutes, aipReducedMinutes);
+                } else if (aipReduction > 0) {
+                    quotaMinutes -= aipReduction;
+                }
+
                 quotaMinutes *= (1 - reductionPercent / 100);
 
-                // Promotional quota
                 let promoMinutes = null;
                 for (const rank of PROMO_QUOTAS) {
                     if (rank.rankRoles.some(roleId => member.roles.cache.has(roleId))) {
@@ -159,9 +171,7 @@ function registerPromotionInfractionCommand(client, config) {
                     }
                 }
 
-                if (promoMinutes) {
-                    promoMinutes *= (1 - reductionPercent / 100); // Apply reduction here
-                }
+                if (promoMinutes) promoMinutes *= (1 - reductionPercent / 100);
 
                 let countedAsPromo = false;
                 if (promoMinutes && entry.totalMinutes >= promoMinutes) {
@@ -169,7 +179,6 @@ function registerPromotionInfractionCommand(client, config) {
                     countedAsPromo = true;
                 }
 
-                // Only check normal quota if NOT promo
                 if (!countedAsPromo) {
                     const diff = quotaMinutes - entry.totalMinutes;
                     if (diff <= 0) {
@@ -182,12 +191,8 @@ function registerPromotionInfractionCommand(client, config) {
                 }
             }
 
-            const makeEmbed = (title, members) => {
-                return new EmbedBuilder()
-                    .setTitle(title)
-                    .setColor(0x2F3136)
-                    .setDescription(members.length ? members.join('\n') : 'None');
-            };
+            const makeEmbed = (title, members) =>
+                new EmbedBuilder().setTitle(title).setColor(0x2F3136).setDescription(members.length ? members.join('\n') : 'None');
 
             const embeds = [
                 makeEmbed('Met Promotional Quota', promoMetQuota),
