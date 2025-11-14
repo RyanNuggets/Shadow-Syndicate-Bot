@@ -73,6 +73,66 @@ const buildCategoryComponents = (username, isMember, isPending) => {
 };
 
 
+/**
+ * Fetches user status and generates the Rank Panel Embed and Category Components.
+ * This function is used for the initial command and refreshing the panel after an action.
+ */
+const getPanelContent = async (username, groupId, config, interactionUserTag = null) => {
+    const userId = await noblox.getIdFromUsername(username);
+    const currentRankId = await noblox.getRankInGroup(groupId, userId);
+    const isMember = currentRankId > 0;
+    
+    let currentRankName = getRankNameFromId(currentRankId, config.DIVISIONS);
+
+    // --- PENDING REQUEST LOGIC (PAGINATION) ---
+    let isPending = false;
+    if (!isMember) {
+      let cursor = null;
+      let requestsData;
+      do {
+          try { 
+              // Using a large limit (e.g., 50) for the first page to maximize chance of finding request quickly.
+              requestsData = await noblox.getJoinRequests(groupId, { cursor: cursor, limit: 50 }); 
+          } catch (e) { 
+              console.error(`Error fetching join requests: ${e.message}`);
+              requestsData = { data: [] }; // Handle API failure gracefully
+          }
+          const requests = Array.isArray(requestsData) ? requestsData : requestsData?.data || [];
+          if (requests.length === 0) break;
+          isPending = requests.some((r) => {
+            const id = r.requester?.userId ?? r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
+            return Number(id) === Number(userId);
+          });
+          if (isPending) break;
+          cursor = requestsData.nextPageCursor;
+      } while (cursor && !isPending);
+    }
+    
+    // --- SIMPLIFIED RANK STATUS VALUE (Handles all 3 states: Member, Pending, Not In Group) ---
+    let rankStatusValue = "Not in Group";
+    if (isPending) {
+        rankStatusValue = `Pending Request`;
+    } else if (isMember) {
+        rankStatusValue = `${currentRankName}`;
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(null) // No color for main embed
+      .setTitle("Roblox Group Panel")
+      .setFooter({text: interactionUserTag ? `Requested by ${interactionUserTag}` : `Status refreshed`}) // Conditional Footer
+      .setTimestamp() 
+      .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=420&height=420&format=png`)
+      .addFields(
+        { name: "User:", value: username, inline: false },
+        { name: "Current Rank:", value: rankStatusValue, inline: false }
+      );
+
+    const componentRows = buildCategoryComponents(username, isMember, isPending);
+
+    return { embed, componentRows };
+};
+
+
 module.exports.registerRankCommand = async (client, config) => {
   await robloxLogin();
 
@@ -105,67 +165,11 @@ module.exports.registerRankCommand = async (client, config) => {
       }
 
       const username = interaction.options.getString("user");
-      // FIX: Removed flags: 64 to make the reply public and prevent the "Unknown Message" error
-      // when moderators take too long to interact with the follow-up menus/buttons.
       await interaction.deferReply(); 
 
       try {
-        const userId = await noblox.getIdFromUsername(username);
-        const currentRankId = await noblox.getRankInGroup(groupId, userId);
-        const isMember = currentRankId > 0;
-        
-        let currentRankName = getRankNameFromId(currentRankId, config.DIVISIONS);
-
-        // --- PENDING REQUEST LOGIC (PAGINATION) ---
-        let isPending = false;
-        if (!isMember) {
-          let cursor = null;
-          let pageCount = 0;
-          // Loop through requests until user found or cursor runs out
-          // This loop is kept here because it's required for the initial embed status
-          while (!isPending) {
-            pageCount++;
-            let requestsData;
-            try { requestsData = await noblox.getJoinRequests(groupId, { cursor: cursor }); } catch (e) { break; }
-            const requests = Array.isArray(requestsData) ? requestsData : requestsData?.data || [];
-            if (requests.length === 0) break;
-            isPending = requests.some((r) => {
-              const id = r.requester?.userId ?? r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
-              return Number(id) === Number(userId);
-            });
-            if (isPending) break;
-            cursor = requestsData.nextPageCursor;
-            if (!cursor) break; 
-          }
-        }
-        
-        // --- SIMPLIFIED RANK STATUS VALUE (Handles all 3 states: Member, Pending, Not In Group) ---
-        let rankStatusValue = "";
-        if (isPending) {
-            rankStatusValue = `Pending Request`;
-        } else if (isMember) {
-            // User is a member, show their rank name
-            rankStatusValue = `${currentRankName}`;
-        } else {
-            // Not a member and no pending request
-            rankStatusValue = "Not in Group";
-        }
-
-        const embed = new EmbedBuilder()
-          .setColor(null) // No color for main embed
-          .setTitle("Roblox Group Panel") // UPDATED: Fixed Title
-          .setFooter({text: `Requested by ${interaction.user.tag}`}) 
-          .setTimestamp() 
-          .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=420&height=420&format=png`)
-          .addFields(
-            // UPDATED: Added User field
-            { name: "User:", value: username, inline: false },
-            // Simplified fields: just the rank status (which now includes membership status)
-            { name: "Current Rank:", value: rankStatusValue, inline: false }
-          );
-
-        // Stage 1: Generate the Category Selection Dropdown
-        const componentRows = buildCategoryComponents(username, isMember, isPending);
+        // Use the new reusable function to get initial content
+        const { embed, componentRows } = await getPanelContent(username, groupId, config, interaction.user.tag);
         
         return interaction.editReply({
             embeds: [embed],
@@ -293,30 +297,13 @@ module.exports.registerRankCommand = async (client, config) => {
         
         // --- 3A. HANDLE BACK BUTTON ---
         if (actionType === 'back') {
-            const userId = await noblox.getIdFromUsername(username);
-            const currentRankId = await noblox.getRankInGroup(groupId, userId);
-            const isMember = currentRankId > 0;
-            
-            // Re-check PENDING status for the Accept Button visibility on the initial menu
-            let isPending = false; 
-            if (!isMember) {
-                const requestsData = await noblox.getJoinRequests(groupId, { limit: 10 }); // Quick check
-                const requests = Array.isArray(requestsData) ? requestsData : requestsData?.data || [];
-                isPending = requests.some((r) => {
-                     const id = r.requester?.userId ?? r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
-                     return Number(id) === Number(userId);
-                });
-            }
-
-            const componentRows = buildCategoryComponents(username, isMember, isPending);
-
-            // Get original embed (first embed in the message)
-            const originalEmbed = interaction.message.embeds[0];
+            // Use the new reusable function to get content for the back view
+            const { embed, componentRows } = await getPanelContent(username, groupId, config);
             
             // Edit message to revert to the Category Dropdown
             await interaction.message.edit({
                 content: null, // Clear the temp content
-                embeds: [originalEmbed], 
+                embeds: [embed], 
                 components: componentRows
             });
             return;
@@ -369,7 +356,7 @@ module.exports.registerRankCommand = async (client, config) => {
                 logMessage = `Performed action: **${selectedAction}** on **${username}**.`;
             }
             
-            // --- DISCORD RESPONSE LOGIC ---
+            // --- DISCORD RESPONSE LOGIC (Success) ---
 
             const successEmbed = new EmbedBuilder()
               .setColor(actionColor) 
@@ -381,17 +368,26 @@ module.exports.registerRankCommand = async (client, config) => {
             await interaction.followUp({
               embeds: [successEmbed],
               components: [],
-              flags: 64, // EPHEMERAL
+              flags: 64, // EPHEMERAL - This ensures the message is hidden!
             });
 
             const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
             if (logChannel) logChannel.send({ embeds: [successEmbed] });
 
-            // Edit the original message to remove components
-            await interaction.message.edit({ components: [] });
+            // --- REFRESH AND RETURN TO CATEGORY VIEW (User Request) ---
+            // Fetch the updated status and components
+            const { embed: refreshedEmbed, componentRows: refreshedComponents } = await getPanelContent(username, groupId, config);
+
+            // Edit the original message to display the new status and bring back the Category Dropdown
+            await interaction.message.edit({ 
+                content: null, // Clear the 'Select an action...' content
+                embeds: [refreshedEmbed],
+                components: refreshedComponents
+            });
+
 
         } catch (err) {
-            // --- ERROR HANDLING LOGIC ---
+            // --- ERROR HANDLING LOGIC (Failure) ---
             
             if (logMessage) {
                 console.error(`[DISCORD API ERROR] Failed to send success followUp/edit message for successful action: ${logMessage}. Discord Error: ${err.message}`);
@@ -409,10 +405,20 @@ module.exports.registerRankCommand = async (client, config) => {
               .setFooter({text: `Action failed for ${interaction.user.tag}`}) 
               .setTimestamp();
 
-            await interaction.followUp({ embeds: [failEmbed], flags: 64 });
+            await interaction.followUp({ embeds: [failEmbed], flags: 64 }); // This is also ephemeral
 
             const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
             if (logChannel) logChannel.send({ embeds: [failEmbed] });
+            
+            // On failure, refresh status and return to the category menu
+            const { embed: currentEmbed, componentRows: currentComponents } = await getPanelContent(username, groupId, config);
+
+            // Edit the original message to return to the Category Dropdown
+            await interaction.message.edit({
+                content: null,
+                embeds: [currentEmbed],
+                components: currentComponents
+            });
         }
     }
   });
