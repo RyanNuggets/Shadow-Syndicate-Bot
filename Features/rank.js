@@ -1,207 +1,193 @@
 // Features/rank.js
 const noblox = require("noblox.js");
 const {
-  SlashCommandBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  TextInputBuilder,
-  TextInputStyle,
-  ModalBuilder,
-  EmbedBuilder,
+    EmbedBuilder,
+    SlashCommandBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+    InteractionType
 } = require("discord.js");
 
 let robloxLoggedIn = false;
 
 async function robloxLogin() {
-  if (robloxLoggedIn) return;
-
-  try {
-    await noblox.setCookie(process.env.ROBLOX_COOKIE);
-    console.log("[ROBLOX] Bot logged in successfully.");
-    robloxLoggedIn = true;
-  } catch (err) {
-    console.log("[ROBLOX] Login failed:", err);
-  }
+    if (robloxLoggedIn) return;
+    try {
+        await noblox.setCookie(process.env.ROBLOX_COOKIE);
+        console.log("[ROBLOX] Bot logged in successfully.");
+        robloxLoggedIn = true;
+    } catch (err) {
+        console.log("[ROBLOX] Login failed:", err);
+    }
 }
 
 module.exports.registerRankCommand = async (client, config) => {
-  await robloxLogin();
+    await robloxLogin();
 
-  // Define /rank command with no options
-  const rankCommand = new SlashCommandBuilder()
-    .setName("rank")
-    .setDescription("Open the rank panel to manage Roblox users.");
+    // Slash command
+    const rankCommand = new SlashCommandBuilder()
+        .setName("rank")
+        .setDescription("Open the Roblox user rank panel");
 
-  // Register globally
-  client.application.commands.create(rankCommand);
+    client.application.commands.create(rankCommand);
 
-  client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isChatInputCommand() && !interaction.isButton() && !interaction.isModalSubmit()) return;
+    client.on("interactionCreate", async (interaction) => {
+        if (!interaction.isChatInputCommand() && !interaction.isButton() && !interaction.isModalSubmit()) return;
+        const userId = interaction.user.id;
 
-    // ---------- Slash Command ----------
-    if (interaction.isChatInputCommand() && interaction.commandName === "rank") {
-      // Permission check
-      const requiredRole = config.COMMANDS.RANK_PERMISSION_ROLE;
-      if (!interaction.member.roles.cache.has(requiredRole)) {
-        return interaction.reply({
-          content: "❌ You do not have permission to use this command.",
-          ephemeral: true,
-        });
-      }
+        // Permission check
+        if (interaction.isChatInputCommand() && interaction.commandName === "rank") {
+            if (!interaction.member.roles.cache.has(config.COMMANDS.RANK_PERMISSION_ROLE)) {
+                return interaction.reply({ content: "❌ You do not have permission.", ephemeral: true });
+            }
 
-      // Embed with "Enter User" button
-      const embed = new EmbedBuilder()
-        .setTitle("Roblox Rank Panel")
-        .setDescription("Click the button below to enter a Roblox username.")
-        .setColor("Blue");
+            // Open initial embed with Enter User button
+            const embed = new EmbedBuilder()
+                .setTitle("Roblox Rank Panel")
+                .setDescription("Click the button below to enter a Roblox username.")
+                .setColor("Blue");
 
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId("enterUser")
-          .setLabel("Enter User")
-          .setEmoji(config.EMOJIS.LOOKUP)
-          .setStyle(ButtonStyle.Primary)
-      );
+            const buttonRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId("enter_user")
+                    .setLabel(`Enter User ${config.EMOJIS.LOOKUP}`)
+                    .setStyle(ButtonStyle.Primary)
+            );
 
-      await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
-    }
-
-    // ---------- Button Clicks ----------
-    if (interaction.isButton()) {
-      if (interaction.customId === "enterUser") {
-        const modal = new ModalBuilder()
-          .setCustomId("usernameModal")
-          .setTitle("Enter Roblox Username");
-
-        const input = new TextInputBuilder()
-          .setCustomId("usernameInput")
-          .setLabel("Roblox Username")
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder("Username")
-          .setRequired(true);
-
-        const row = new ActionRowBuilder().addComponents(input);
-        modal.addComponents(row);
-
-        await interaction.showModal(modal);
-      }
-
-      // Handling rank buttons after user selected
-      if (interaction.customId.startsWith("rank_") || interaction.customId === "removeUser") {
-        const [action, username] = interaction.customId.split("_");
-
-        try {
-          const userId = await noblox.getIdFromUsername(username);
-          const groupId = config.ROBLOX.GROUP_ID;
-
-          if (action === "rank_DHS") {
-            await noblox.setRank(groupId, userId, config.DIVISIONS.DHS.rankId);
-          } else if (action === "rank_CHP") {
-            await noblox.setRank(groupId, userId, config.DIVISIONS.CHP.rankId);
-          } else if (action === "rank_LASD") {
-            await noblox.setRank(groupId, userId, config.DIVISIONS.LASD.rankId);
-          } else if (action === "removeUser") {
-            await noblox.setRank(groupId, userId, 0); // Remove from group
-          }
-
-          const successEmbed = new EmbedBuilder()
-            .setColor("Green")
-            .setTitle("Action Successful")
-            .setDescription(`Performed **${action}** on **${username}**.`)
-            .setTimestamp();
-
-          await interaction.update({ embeds: [successEmbed], components: [] });
-
-          const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
-          if (logChannel) logChannel.send({ embeds: [successEmbed] });
-        } catch (err) {
-          const failEmbed = new EmbedBuilder()
-            .setColor("Red")
-            .setTitle("Action Failed")
-            .addFields(
-              { name: "Username", value: interaction.customId.split("_")[1] },
-              { name: "Reason", value: err.message || "Unknown error" }
-            )
-            .setTimestamp();
-
-          await interaction.update({ embeds: [failEmbed], components: [] });
-
-          const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
-          if (logChannel) logChannel.send({ embeds: [failEmbed] });
+            return interaction.reply({ embeds: [embed], components: [buttonRow], ephemeral: true });
         }
-      }
-    }
 
-    // ---------- Modal Submit ----------
-    if (interaction.isModalSubmit() && interaction.customId === "usernameModal") {
-      const username = interaction.fields.getTextInputValue("usernameInput");
-      const groupId = config.ROBLOX.GROUP_ID;
+        // Handle Enter User button
+        if (interaction.isButton() && interaction.customId === "enter_user") {
+            const modal = new ModalBuilder()
+                .setCustomId("enter_user_modal")
+                .setTitle("Enter Roblox Username");
 
-      let isMember = false;
-      let isPending = false;
+            const usernameInput = new TextInputBuilder()
+                .setCustomId("username")
+                .setLabel("Roblox Username")
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true);
 
-      try {
-        const userId = await noblox.getIdFromUsername(username);
-        const currentRank = await noblox.getRankInGroup(groupId, userId);
-        isMember = currentRank > 0;
+            const row = new ActionRowBuilder().addComponents(usernameInput);
+            modal.addComponents(row);
 
-        // Check pending requests
-        const requests = await noblox.getJoinRequests(groupId);
-        isPending = requests.some((r) => r.UserId === userId);
+            return interaction.showModal(modal);
+        }
 
-        // Info Embed
-        const infoEmbed = new EmbedBuilder()
-          .setColor("Blue")
-          .setTitle("Roblox User Info")
-          .addFields(
-            { name: "Username", value: username, inline: true },
-            { name: "In Group", value: isMember ? "✅ Yes" : "❌ No", inline: true },
-            { name: "Pending Request", value: isPending ? "✅ Yes" : "❌ No", inline: true }
-          );
+        // Handle modal submission
+        if (interaction.type === InteractionType.ModalSubmit && interaction.customId === "enter_user_modal") {
+            const username = interaction.fields.getTextInputValue("username");
 
-        // Buttons for actions
-        const buttons = new ActionRowBuilder();
+            await interaction.deferReply({ ephemeral: true });
 
-        // Accept into group
-        buttons.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`rank_DHS_${username}`)
-            .setLabel(`${config.DIVISIONS.DHS.emoji} DHS`)
-            .setStyle(ButtonStyle.Primary)
-            .setDisabled(isMember)
-        );
+            let robloxId;
+            try {
+                robloxId = await noblox.getIdFromUsername(username);
+            } catch (err) {
+                return interaction.editReply({ content: `❌ Failed to fetch user: ${err.message}` });
+            }
 
-        buttons.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`rank_CHP_${username}`)
-            .setLabel(`${config.DIVISIONS.CHP.emoji} CHP`)
-            .setStyle(ButtonStyle.Primary)
-            .setDisabled(!isMember)
-        );
+            // Fetch group info
+            let isInGroup = false;
+            let currentRank = null;
+            try {
+                const info = await noblox.getRankInGroup(config.ROBLOX.GROUP_ID, robloxId);
+                isInGroup = info > 0;
+                currentRank = info;
+            } catch {
+                isInGroup = false;
+            }
 
-        buttons.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`rank_LASD_${username}`)
-            .setLabel(`${config.DIVISIONS.LASD.emoji} LASD`)
-            .setStyle(ButtonStyle.Primary)
-            .setDisabled(!isMember)
-        );
+            // Fetch join requests safely
+            let requests = [];
+            try {
+                const reqs = await noblox.getJoinRequests(config.ROBLOX.GROUP_ID);
+                requests = Array.isArray(reqs) ? reqs : [];
+            } catch {}
 
-        // Remove button
-        buttons.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`removeUser_${username}`)
-            .setLabel("Remove From Group")
-            .setEmoji(config.EMOJIS.REMOVE)
-            .setStyle(ButtonStyle.Danger)
-            .setDisabled(!isMember && !isPending)
-        );
+            const hasRequest = requests.some(r => r.userId === robloxId);
 
-        await interaction.reply({ embeds: [infoEmbed], components: [buttons], ephemeral: true });
-      } catch (err) {
-        await interaction.reply({ content: `❌ Failed to fetch user: ${err.message}`, ephemeral: true });
-      }
-    }
-  });
+            const infoEmbed = new EmbedBuilder()
+                .setTitle(`User Info: ${username}`)
+                .setColor("Green")
+                .addFields(
+                    { name: "Roblox ID", value: robloxId.toString(), inline: true },
+                    { name: "In Group?", value: isInGroup ? "✅ Yes" : "❌ No", inline: true },
+                    { name: "Join Request?", value: hasRequest ? "✅ Yes" : "❌ No", inline: true },
+                    { name: "Current Rank", value: currentRank ? currentRank.toString() : "N/A", inline: true }
+                );
+
+            const row = new ActionRowBuilder();
+
+            // Accept Join Request
+            row.addComponents(
+                new ButtonBuilder()
+                    .setCustomId("accept_join")
+                    .setLabel("Accept Join Request")
+                    .setStyle(ButtonStyle.Success)
+                    .setDisabled(isInGroup || !hasRequest)
+            );
+
+            // Department buttons
+            for (const dept in config.DIVISIONS) {
+                row.addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`rank_${dept}`)
+                        .setLabel(`${config.DIVISIONS[dept].emoji} ${dept}`)
+                        .setStyle(ButtonStyle.Primary)
+                        .setDisabled(!isInGroup || currentRank === config.DIVISIONS[dept].rankId)
+                );
+            }
+
+            // Remove from group button
+            row.addComponents(
+                new ButtonBuilder()
+                    .setCustomId("remove_group")
+                    .setLabel(`Remove From Group ${config.EMOJIS.REMOVE}`)
+                    .setStyle(ButtonStyle.Danger)
+                    .setDisabled(!isInGroup)
+            );
+
+            return interaction.editReply({ embeds: [infoEmbed], components: [row] });
+        }
+
+        // Handle department / accept / remove buttons
+        if (interaction.isButton()) {
+            const [action, dept] = interaction.customId.split("_");
+            await interaction.deferReply({ ephemeral: true });
+
+            let robloxUser;
+            try {
+                // Embed message contains Roblox ID in fields
+                robloxUser = parseInt(interaction.message.embeds[0].data.fields.find(f => f.name === "Roblox ID").value);
+            } catch {
+                return interaction.editReply({ content: "❌ Could not determine Roblox user." });
+            }
+
+            try {
+                if (action === "accept") {
+                    await noblox.handleJoinRequest(config.ROBLOX.GROUP_ID, robloxUser, true);
+                    return interaction.editReply({ content: `✅ User accepted into the group.` });
+                }
+
+                if (action === "rank") {
+                    const rankId = config.DIVISIONS[dept].rankId;
+                    await noblox.setRank(config.ROBLOX.GROUP_ID, robloxUser, rankId);
+                    return interaction.editReply({ content: `✅ User ranked to ${dept} (ID ${rankId}).` });
+                }
+
+                if (action === "remove") {
+                    await noblox.setRank(config.ROBLOX.GROUP_ID, robloxUser, 0); // Remove from group
+                    return interaction.editReply({ content: `✅ User removed from group.` });
+                }
+            } catch (err) {
+                return interaction.editReply({ content: `❌ Failed: ${err.message}` });
+            }
+        }
+    });
 };
