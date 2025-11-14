@@ -27,8 +27,9 @@ module.exports.registerRankCommand = async (client, config) => {
   const rankCommand = new SlashCommandBuilder()
     .setName("rank")
     .setDescription("Manage Roblox users in the group")
-    .addStringOption(option =>
-      option.setName("user")
+    .addStringOption((option) =>
+      option
+        .setName("user")
         .setDescription("Roblox username")
         .setRequired(true)
     );
@@ -36,8 +37,6 @@ module.exports.registerRankCommand = async (client, config) => {
   await client.application.commands.create(rankCommand);
 
   client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isChatInputCommand() && !interaction.isButton()) return;
-
     const groupId = config.ROBLOX.GROUP_ID;
 
     // --------------------- SLASH COMMAND ---------------------
@@ -52,20 +51,28 @@ module.exports.registerRankCommand = async (client, config) => {
 
       const username = interaction.options.getString("user");
 
+      await interaction.deferReply({ ephemeral: true });
+
       try {
         const userId = await noblox.getIdFromUsername(username);
         const currentRank = await noblox.getRankInGroup(groupId, userId);
         const isMember = currentRank > 0;
 
-        // Get join requests
-        const requestsRaw = await noblox.getJoinRequests(groupId);
+        // Get join requests safely
         let requests = [];
-        if (Array.isArray(requestsRaw)) requests = requestsRaw;
-        else if (requestsRaw?.data) requests = requestsRaw.data;
+        try {
+          const rawRequests = await noblox.getJoinRequests(groupId);
+          if (Array.isArray(rawRequests)) {
+            requests = rawRequests;
+          } else if (rawRequests.data) {
+            requests = rawRequests.data;
+          }
+        } catch {
+          requests = [];
+        }
 
-        const isPending = requests.some(r => Number(r.UserId) === Number(userId));
+        const isPending = requests.some((r) => Number(r.UserId) === Number(userId));
 
-        // Build info embed
         const infoEmbed = new EmbedBuilder()
           .setColor("Blue")
           .setTitle("Roblox User Info")
@@ -75,9 +82,9 @@ module.exports.registerRankCommand = async (client, config) => {
             { name: "Pending Request", value: isPending ? "✅ Yes" : "❌ No", inline: true }
           );
 
-        // Buttons
         const buttons = new ActionRowBuilder();
 
+        // Division buttons
         for (const div of Object.keys(config.DIVISIONS)) {
           const d = config.DIVISIONS[div];
           buttons.addComponents(
@@ -90,7 +97,7 @@ module.exports.registerRankCommand = async (client, config) => {
           );
         }
 
-        // Remove From Group
+        // Remove From Group button
         buttons.addComponents(
           new ButtonBuilder()
             .setCustomId(`removeUser_${username}`)
@@ -100,7 +107,7 @@ module.exports.registerRankCommand = async (client, config) => {
             .setDisabled(!isMember && !isPending)
         );
 
-        // Accept Group Request
+        // Accept Group Request button if pending
         if (isPending && !isMember) {
           buttons.addComponents(
             new ButtonBuilder()
@@ -111,15 +118,13 @@ module.exports.registerRankCommand = async (client, config) => {
           );
         }
 
-        return interaction.reply({
+        return interaction.editReply({
           embeds: [infoEmbed],
           components: [buttons],
-          ephemeral: false,
         });
       } catch (err) {
-        return interaction.reply({
+        return interaction.editReply({
           content: `❌ Failed to fetch user: ${err.message}`,
-          ephemeral: true,
         });
       }
     }
@@ -151,7 +156,7 @@ module.exports.registerRankCommand = async (client, config) => {
           .setDescription(`Performed **${action}** on **${username}**.`)
           .setTimestamp();
 
-        // Update original message safely
+        // Update the button message
         await interaction.update({ embeds: [successEmbed], components: [] });
 
         const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
