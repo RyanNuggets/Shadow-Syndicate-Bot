@@ -14,6 +14,13 @@ async function robloxLogin() {
     await noblox.setCookie(process.env.ROBLOX_COOKIE);
     console.log("[ROBLOX] Bot logged in successfully.");
     robloxLoggedIn = true;
+    
+    // --- TEMPORARY DEBUG LOG: Log all available methods on the noblox object ---
+    // This will help us confirm the correct function name for handling join requests.
+    const nobloxMethods = Object.keys(noblox).filter(key => typeof noblox[key] === 'function');
+    console.log("[ROBLOX DEBUG] Available noblox functions (for debugging):", nobloxMethods.join(', '));
+    // --- END TEMPORARY DEBUG LOG ---
+
   } catch (err) {
     console.log("[ROBLOX] Login failed:", err);
   }
@@ -231,7 +238,8 @@ module.exports.registerRankCommand = async (client, config) => {
         }
 
         if (selected === "accept") {
-          await noblox.acceptJoinRequest(groupId, userId);
+          // Corrected function name to handleJoinRequest
+          await noblox.handleJoinRequest(groupId, userId, true);
           actionTitle = "Request Accepted Successfully";
           logMessage = `Accepted join request for **${username}**. They should now be rank 1.`;
         }
