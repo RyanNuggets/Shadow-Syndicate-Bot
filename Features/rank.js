@@ -231,8 +231,8 @@ module.exports.registerRankCommand = async (client, config) => {
           // Fetch rank before exiling for accurate logging
           const currentRank = await noblox.getRankInGroup(groupId, userId);
           
-          // Exile member (set rank to 0)
-          await noblox.setRank(groupId, userId, 0);
+          // *** FIX: Changed setRank(..., 0) to the dedicated noblox.exile() function ***
+          await noblox.exile(groupId, userId);
           actionTitle = "Exiled Successfully";
           logMessage = `Exiled **${username}** (Previous Rank: ${currentRank}) from the group.`;
         }
