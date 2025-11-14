@@ -26,15 +26,14 @@ module.exports.registerRankCommand = async (client, config) => {
 
   const rankCommand = new SlashCommandBuilder()
     .setName("rank")
-    .setDescription("Manage a Roblox user")
+    .setDescription("Manage Roblox users in the group")
     .addStringOption(option =>
-      option
-        .setName("user")
+      option.setName("user")
         .setDescription("Roblox username")
         .setRequired(true)
     );
 
-  client.application.commands.create(rankCommand);
+  await client.application.commands.create(rankCommand);
 
   client.on("interactionCreate", async (interaction) => {
     if (!interaction.isChatInputCommand() && !interaction.isButton()) return;
@@ -47,18 +46,21 @@ module.exports.registerRankCommand = async (client, config) => {
       if (!interaction.member.roles.cache.has(requiredRole)) {
         return interaction.reply({
           content: "❌ You do not have permission to use this command.",
-          ephemeral: true,
+          flags: 64,
         });
       }
 
       const username = interaction.options.getString("user");
+
+      await interaction.deferReply({ flags: 64 });
 
       try {
         const userId = await noblox.getIdFromUsername(username);
         const currentRank = await noblox.getRankInGroup(groupId, userId);
         const isMember = currentRank > 0;
 
-        const requests = await noblox.getJoinRequests(groupId);
+        const requestsRaw = await noblox.getJoinRequests(groupId);
+        const requests = Array.isArray(requestsRaw) ? requestsRaw : requestsRaw.data || [];
         const isPending = requests.some(r => Number(r.UserId) === Number(userId));
 
         const infoEmbed = new EmbedBuilder()
@@ -72,20 +74,30 @@ module.exports.registerRankCommand = async (client, config) => {
 
         const buttons = new ActionRowBuilder();
 
-        // Division rank buttons
+        // Divisions buttons
         for (const div of Object.keys(config.DIVISIONS)) {
           const d = config.DIVISIONS[div];
           buttons.addComponents(
             new ButtonBuilder()
               .setCustomId(`rank_${div}_${username}`)
               .setLabel(div)
-              .setEmoji(d.emoji)
+              .setEmoji(d.emoji) // should be {id,name} for custom emoji
               .setStyle(ButtonStyle.Primary)
               .setDisabled(!isMember)
           );
         }
 
-        // Remove / Accept buttons
+        // Remove From Group button
+        buttons.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`removeUser_${username}`)
+            .setLabel("Remove From Group")
+            .setEmoji(config.EMOJIS.REMOVE)
+            .setStyle(ButtonStyle.Danger)
+            .setDisabled(!isMember && !isPending)
+        );
+
+        // Accept Group Request button if pending
         if (isPending && !isMember) {
           buttons.addComponents(
             new ButtonBuilder()
@@ -94,29 +106,22 @@ module.exports.registerRankCommand = async (client, config) => {
               .setEmoji("✅")
               .setStyle(ButtonStyle.Success)
           );
-        } else {
-          buttons.addComponents(
-            new ButtonBuilder()
-              .setCustomId(`removeUser_${username}`)
-              .setLabel("Remove From Group")
-              .setEmoji(config.EMOJIS.REMOVE)
-              .setStyle(ButtonStyle.Danger)
-              .setDisabled(!isMember)
-          );
         }
 
-        await interaction.reply({ embeds: [infoEmbed], components: [buttons] });
+        return interaction.editReply({
+          embeds: [infoEmbed],
+          components: [buttons],
+        });
       } catch (err) {
-        return interaction.reply({
+        return interaction.editReply({
           content: `❌ Failed to fetch user: ${err.message}`,
-          ephemeral: true,
         });
       }
     }
 
     // --------------------- BUTTON HANDLER ---------------------
     if (interaction.isButton()) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: 64 });
 
       const [action, division, ...rest] = interaction.customId.split("_");
       const username = rest.join("_");
