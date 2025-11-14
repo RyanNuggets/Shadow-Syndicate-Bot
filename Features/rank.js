@@ -93,12 +93,24 @@ const buildCategoryComponents = (username, isMember, isPending) => {
       });
   }
 
+  // NEW: Add Cancel option to the dropdown
+  categoryOptions.push({
+      label: 'Cancel Panel',
+      value: 'cancel',
+      description: 'Close the rank panel.',
+      emoji: '🚫'
+  });
+
+  let components = [];
+  
   if (categoryOptions.length > 0) {
       categorySelectMenu.addOptions(categoryOptions);
-      return [new ActionRowBuilder().addComponents(categorySelectMenu)];
+      components.push(new ActionRowBuilder().addComponents(categorySelectMenu));
   }
   
-  return [];
+  // Removed the dedicated Cancel Button row
+
+  return components; // Return all rows
 };
 
 
@@ -231,6 +243,9 @@ module.exports.registerRankCommand = async (client, config) => {
         });
       }
     }
+    
+    // --------------------- BUTTON HANDLER (Stage 1.5: Cancel Button) - REMOVED ---------------------
+    // The previous cancel button handler was removed as requested.
 
     // --------------------- CATEGORY DROPDOWN HANDLER (Stage 2: Category Selection -> Action Dropdown Generation) ---------------------
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('categorySelect_')) {
@@ -244,6 +259,22 @@ module.exports.registerRankCommand = async (client, config) => {
 
       const username = interaction.customId.replace("categorySelect_", "");
       const selectedCategory = interaction.values[0];
+
+      // NEW: Handle Cancel Option from the dropdown
+      if (selectedCategory === 'cancel') {
+          const embed = new EmbedBuilder()
+              .setColor(0xFFA500) // Orange/Warning color
+              .setTitle("Rank Panel Cancelled")
+              .setDescription(`The ranking operation for **${username}** was cancelled by ${interaction.user.tag}.`)
+              .setTimestamp();
+              
+          await interaction.editReply({
+              embeds: [embed],
+              components: [] // Remove all components
+          });
+          return;
+      }
+
       const isRanksCategory = selectedCategory === "category_ranks";
       const isActionsCategory = selectedCategory === "category_actions";
 
