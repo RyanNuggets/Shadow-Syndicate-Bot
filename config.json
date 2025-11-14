@@ -86,8 +86,35 @@
   },
 
   "ROBLOX": {
-    "GROUP_ID": 16804060,
-    "RANK_ROLE_ID": 3,
-    "RANK_PERMS": "1437715613463089242"
+    "GROUP_ID": 16804055,
+
+    "RANK_IDS": {
+      "DHS": 9,
+      "CHP": 6,
+      "LASD": 3
+    }
+  },
+
+  "EMOJIS": {
+    "LOOKUP": "<:lookup:1438837345536180385>"
+  },
+
+  "DIVISIONS": {
+    "DHS": {
+      "emoji": "<:DHS:1438835075843358720>",
+      "rankId": 9
+    },
+    "CHP": {
+      "emoji": "<:CHP:1438834718492594176>",
+      "rankId": 6
+    },
+    "LASD": {
+      "emoji": "<:LASD:1438834657436373064>",
+      "rankId": 3
+    }
+  },
+
+  "COMMANDS": {
+    "RANK_PERMISSION_ROLE": "1437715613463089242"
   }
 }
