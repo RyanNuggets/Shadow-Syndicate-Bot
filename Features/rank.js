@@ -58,21 +58,27 @@ module.exports.registerRankCommand = async (client, config) => {
         const currentRank = await noblox.getRankInGroup(groupId, userId);
         const isMember = currentRank > 0;
 
-        // --------------------- FIXED PENDING REQUEST LOGIC (PAGINATION) ---------------------
+        // --------------------- FIXED PENDING REQUEST LOGIC (PAGINATION & DEBUG) ---------------------
         let isPending = false;
         if (!isMember) {
           let cursor = null;
+          let pageCount = 0; // Added page counter
           
           // Keep fetching until no cursor is returned (last page) or request is found
           while (!isPending) {
+            pageCount++;
             let requestsData;
+            
             try {
+                // Log the page being fetched
+                console.log(`[ROBLOX] Checking join request page ${pageCount}. Cursor: ${cursor || 'start'}`);
+                
                 // Fetch join requests, using the cursor if available
                 requestsData = await noblox.getJoinRequests(groupId, { cursor: cursor });
             } catch (apiError) {
                 // Log API error if fetching pages fails (e.g., rate limit)
-                console.error(`[ROBLOX API] Error fetching join requests for group ${groupId}:`, apiError.message);
-                break; 
+                console.error(`[ROBLOX API] Error fetching join requests for group ${groupId} on page ${pageCount}:`, apiError.message);
+                break; // Break the while loop on API error
             }
 
             // Get the array of requests, handling both raw array and paginated object formats
@@ -80,18 +86,28 @@ module.exports.registerRankCommand = async (client, config) => {
               ? requestsData
               : requestsData?.data || [];
             
-            // If the current page is empty, break
+            console.log(`[ROBLOX] Page ${pageCount} returned ${requests.length} requests.`);
+            
+            // If the current page is empty, or the group has no pending requests, break
             if (requests.length === 0) break;
 
             // Check if the target user is in the current page of requests
             isPending = requests.some((r) => {
+              // Check three common places for the user ID in request objects
               const id = r.UserId ?? r.userId ?? r.user?.userId ?? 0;
               return Number(id) === Number(userId);
             });
 
-            // Move to the next page if the user was not found and a next page exists
+            // If the user was found, break immediately
+            if (isPending) {
+              console.log(`[ROBLOX] Found pending request for ${username} on page ${pageCount}.`);
+              break;
+            }
+
+            // Move to the next page if a cursor exists. If not, this was the last page.
             cursor = requestsData.nextPageCursor;
-            if (isPending || !cursor) {
+            if (!cursor) {
+              console.log(`[ROBLOX] Reached the last page (${pageCount}).`);
               break; 
             }
           }
@@ -125,7 +141,7 @@ module.exports.registerRankCommand = async (client, config) => {
             value: `rank_${divName}`,
             emoji: div.emoji,
             description: isMember ? `Set rank to ${divName}` : "User not in group (Cannot Rank)",
-            // Removed: default: !isMember, as it causes DiscordAPIError[50035] when multiple options are defaulted.
+            // Removed default property to prevent Discord API Error
           });
         }
 
