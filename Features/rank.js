@@ -210,11 +210,13 @@ module.exports.registerRankCommand = async (client, config) => {
       const username = interaction.customId.replace("rankMenu_", "");
       const selected = interaction.values[0];
 
-      let logMessage = "";
+      let logMessage = ""; // Defined here so it's accessible by the catch block
       let actionTitle = "Action Successful";
 
       try {
         const userId = await noblox.getIdFromUsername(username);
+
+        // --- 1. PERFORM ROBLOX ACTION (Success sets logMessage) ---
 
         if (selected.startsWith("rank_")) {
           const division = selected.replace("rank_", "");
@@ -246,6 +248,8 @@ module.exports.registerRankCommand = async (client, config) => {
         if (!logMessage) {
             logMessage = `Performed action: **${selected}** on **${username}**.`;
         }
+        
+        // --- 2. DISCORD RESPONSE LOGIC (This is what might be failing) ---
 
         const successEmbed = new EmbedBuilder()
           .setColor("Green")
@@ -253,33 +257,45 @@ module.exports.registerRankCommand = async (client, config) => {
           .setDescription(logMessage)
           .setTimestamp();
 
-        // Use followUp instead of editReply since deferUpdate was used
+        // Send success message to the user
         await interaction.followUp({
           embeds: [successEmbed],
           components: [],
           flags: 64, // EPHEMERAL
         });
 
+        // Send success message to the logs channel
         const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
         if (logChannel) logChannel.send({ embeds: [successEmbed] });
 
-        // Since we deferred the UPDATE, we need to edit the original message to remove the dropdown
+        // Edit the original message to remove the dropdown
         await interaction.message.edit({ components: [] });
 
       } catch (err) {
+        // --- 3. ERROR HANDLING LOGIC ---
+        
+        // If logMessage has content, the Roblox action succeeded, but a Discord response (followUp, message.edit) failed.
+        if (logMessage) {
+            console.error(`[DISCORD API ERROR] Failed to send success followUp/edit message for successful action: ${logMessage}. Discord Error: ${err.message}`);
+            // We just log the secondary failure and DO NOT send a misleading "Action Failed" to the user.
+            return;
+        }
+
+        // If logMessage is empty, the action failed before or during the Roblox API call. This is a true failure.
         const failEmbed = new EmbedBuilder()
           .setColor("Red")
           .setTitle("Action Failed")
           .addFields(
             { name: "Username", value: username, inline: true },
             { name: "Action", value: selected, inline: true },
-            { name: "Reason", value: err.message }
+            { name: "Reason", value: err.message || "Unknown error occurred during API call." } // Fallback for cryptic messages
           )
           .setTimestamp();
 
-        // Use followUp for error reporting
+        // Report the failure to the user
         await interaction.followUp({ embeds: [failEmbed], flags: 64 });
 
+        // Log the failure
         const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
         if (logChannel) logChannel.send({ embeds: [failEmbed] });
       }
