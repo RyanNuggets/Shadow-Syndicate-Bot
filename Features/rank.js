@@ -15,10 +15,8 @@ async function robloxLogin() {
     console.log("[ROBLOX] Bot logged in successfully.");
     robloxLoggedIn = true;
     
-    // --- TEMPORARY DEBUG LOG: Log all available methods on the noblox object ---
-    // This will help us confirm the correct function name for handling join requests.
-    const nobloxMethods = Object.keys(noblox).filter(key => typeof noblox[key] === 'function');
-    console.log("[ROBLOX DEBUG] Available noblox functions (for debugging):", nobloxMethods.join(', '));
+    // --- TEMPORARY DEBUG LOG REMOVED ---
+    // The debug log has been removed as it confirmed the function name (handleJoinRequest) is correct.
     // --- END TEMPORARY DEBUG LOG ---
 
   } catch (err) {
