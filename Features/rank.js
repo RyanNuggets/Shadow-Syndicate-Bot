@@ -28,6 +28,7 @@ async function robloxLogin() {
 module.exports.registerRankCommand = async (client, config) => {
   await robloxLogin();
 
+  // Register command
   const rankCommand = new SlashCommandBuilder()
     .setName("rank")
     .setDescription("Open the rank panel to manage Roblox users.");
@@ -35,21 +36,16 @@ module.exports.registerRankCommand = async (client, config) => {
   client.application.commands.create(rankCommand);
 
   client.on("interactionCreate", async (interaction) => {
-    if (
-      !interaction.isChatInputCommand() &&
-      !interaction.isButton() &&
-      !interaction.isModalSubmit()
-    )
-      return;
-
-    // --------------------- SLASH COMMAND ---------------------
+    // ---------------------------------------------------------------------
+    // SLASH COMMAND
+    // ---------------------------------------------------------------------
     if (interaction.isChatInputCommand() && interaction.commandName === "rank") {
       const requiredRole = config.COMMANDS.RANK_PERMISSION_ROLE;
 
       if (!interaction.member.roles.cache.has(requiredRole)) {
         return interaction.reply({
           content: "❌ You do not have permission to use this command.",
-          flags: 64, // EPHEMERAL
+          ephemeral: true,
         });
       }
 
@@ -69,101 +65,43 @@ module.exports.registerRankCommand = async (client, config) => {
       return interaction.reply({
         embeds: [embed],
         components: [row],
-        flags: 64,
+        ephemeral: true,
       });
     }
 
-    // --------------------- BUTTON: OPEN MODAL ---------------------
+    // ---------------------------------------------------------------------
+    // BUTTON: OPEN MODAL
+    // ---------------------------------------------------------------------
     if (interaction.isButton() && interaction.customId === "enterUser") {
+      const modal = new ModalBuilder()
+        .setCustomId("usernameModal")
+        .setTitle("Enter Roblox Username");
+
+      const input = new TextInputBuilder()
+        .setCustomId("usernameInput")
+        .setLabel("Roblox Username")
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder("Username")
+        .setRequired(true);
+
+      const row = new ActionRowBuilder().addComponents(input);
+      modal.addComponents(row);
+
+      // Show modal — NO reply before this
       try {
-        const modal = new ModalBuilder()
-          .setCustomId("usernameModal")
-          .setTitle("Enter Roblox Username");
-
-        const input = new TextInputBuilder()
-          .setCustomId("usernameInput")
-          .setLabel("Roblox Username")
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder("Username")
-          .setRequired(true);
-
-        const row = new ActionRowBuilder().addComponents(input);
-        modal.addComponents(row);
-
-        // IMPORTANT: FIRST RESPONSE MUST BE showModal
         return await interaction.showModal(modal);
       } catch (err) {
-        console.error("Failed to show modal:", err);
-
-        return interaction.reply({
-          content: `❌ Failed to show modal: ${err.message}`,
-          flags: 64,
-        });
+        console.error("Modal Error:", err);
+        // Interaction might be expired — safe return only
+        return;
       }
     }
 
-    // --------------------- BUTTON: RANK ACTIONS ---------------------
-    if (interaction.isButton()) {
-      if (
-        interaction.customId.startsWith("rank_") ||
-        interaction.customId.startsWith("removeUser_")
-      ) {
-        const groupId = config.ROBLOX.GROUP_ID;
-
-        const parts = interaction.customId.split("_");
-        const action = parts[0];
-        const division = parts[1];
-        const username = parts.slice(2).join("_");
-
-        await interaction.deferReply({ flags: 64 });
-
-        try {
-          const userId = await noblox.getIdFromUsername(username);
-
-          if (action === "rank") {
-            const rankId = config.DIVISIONS[division].rankId;
-            await noblox.setRank(groupId, userId, rankId);
-          }
-
-          if (action === "removeUser") {
-            await noblox.setRank(groupId, userId, 0);
-          }
-
-          const successEmbed = new EmbedBuilder()
-            .setColor("Green")
-            .setTitle("Action Successful")
-            .setDescription(`Performed **${action}** on **${username}**.`)
-            .setTimestamp();
-
-          await interaction.editReply({ embeds: [successEmbed], components: [] });
-
-          const logChannel = client.channels.cache.get(
-            config.CHANNELS.RANK_LOGS
-          );
-          if (logChannel) logChannel.send({ embeds: [successEmbed] });
-        } catch (err) {
-          const failEmbed = new EmbedBuilder()
-            .setColor("Red")
-            .setTitle("Action Failed")
-            .addFields(
-              { name: "Username", value: username },
-              { name: "Reason", value: err.message }
-            )
-            .setTimestamp();
-
-          await interaction.editReply({ embeds: [failEmbed] });
-
-          const logChannel = client.channels.cache.get(
-            config.CHANNELS.RANK_LOGS
-          );
-          if (logChannel) logChannel.send({ embeds: [failEmbed] });
-        }
-      }
-    }
-
-    // --------------------- MODAL SUBMIT ---------------------
+    // ---------------------------------------------------------------------
+    // MODAL SUBMIT
+    // ---------------------------------------------------------------------
     if (interaction.isModalSubmit() && interaction.customId === "usernameModal") {
-      await interaction.deferReply({ flags: 64 });
+      await interaction.deferReply({ ephemeral: true });
 
       const username = interaction.fields.getTextInputValue("usernameInput");
       const groupId = config.ROBLOX.GROUP_ID;
@@ -193,7 +131,7 @@ module.exports.registerRankCommand = async (client, config) => {
 
         const buttons = new ActionRowBuilder();
 
-        // Divisions
+        // Division buttons
         for (const div of ["DHS", "CHP", "LASD"]) {
           const d = config.DIVISIONS[div];
 
@@ -206,7 +144,7 @@ module.exports.registerRankCommand = async (client, config) => {
           );
         }
 
-        // Remove button
+        // Remove user button
         buttons.addComponents(
           new ButtonBuilder()
             .setCustomId(`removeUser_${username}`)
@@ -224,6 +162,62 @@ module.exports.registerRankCommand = async (client, config) => {
         return interaction.editReply({
           content: `❌ Failed to fetch user: ${err.message}`,
         });
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // BUTTON: RANK ACTIONS
+    // ---------------------------------------------------------------------
+    if (interaction.isButton()) {
+      if (
+        interaction.customId.startsWith("rank_") ||
+        interaction.customId.startsWith("removeUser_")
+      ) {
+        await interaction.deferReply({ ephemeral: true });
+
+        const groupId = config.ROBLOX.GROUP_ID;
+        const parts = interaction.customId.split("_");
+        const action = parts[0];
+        const division = parts[1];
+        const username = parts.slice(2).join("_");
+
+        try {
+          const userId = await noblox.getIdFromUsername(username);
+
+          if (action === "rank") {
+            const rankId = config.DIVISIONS[division].rankId;
+            await noblox.setRank(groupId, userId, rankId);
+          }
+
+          if (action === "removeUser") {
+            await noblox.setRank(groupId, userId, 0);
+          }
+
+          const successEmbed = new EmbedBuilder()
+            .setColor("Green")
+            .setTitle("Action Successful")
+            .setDescription(`Performed **${action}** on **${username}**.`)
+            .setTimestamp();
+
+          await interaction.editReply({ embeds: [successEmbed] });
+
+          const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
+          if (logChannel) logChannel.send({ embeds: [successEmbed] });
+        } catch (err) {
+          const failEmbed = new EmbedBuilder()
+            .setColor("Red")
+            .setTitle("Action Failed")
+            .addFields(
+              { name: "Username", value: username },
+              { name: "Reason", value: err.message }
+            )
+            .setTimestamp();
+
+          await interaction.editReply({ embeds: [failEmbed] });
+
+          const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
+          if (logChannel) logChannel.send({ embeds: [failEmbed] });
+        }
       }
     }
   });
