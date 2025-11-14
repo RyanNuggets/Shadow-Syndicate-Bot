@@ -88,11 +88,11 @@ module.exports.registerRankCommand = async (client, config) => {
             
             console.log(`[ROBLOX] Page ${pageCount} returned ${requests.length} requests.`);
             
-            // --- CRITICAL DEBUG LOGGING: Print all Usernames and IDs found on this page or the raw object if we fail ---
+            // --- CRITICAL DEBUG LOGGING (Updated to find the ID and Username) ---
             const foundUsers = requests.map(r => {
-                // Check all known fields where ID might reside
-                const id = r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
-                const uname = r.Username ?? r.username ?? r.user?.username ?? 'UnknownUser';
+                // *** FIX: Prioritize checking the nested 'requester' object first ***
+                const id = r.requester?.userId ?? r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
+                const uname = r.requester?.username ?? r.Username ?? r.username ?? r.user?.username ?? 'UnknownUser';
                 
                 // If we failed to find the ID, log the raw object structure
                 if (id === 0) {
@@ -113,8 +113,8 @@ module.exports.registerRankCommand = async (client, config) => {
 
             // Check if the target user is in the current page of requests
             isPending = requests.some((r) => {
-              // Check four common places for the user ID in request objects, including r.id
-              const id = r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
+              // *** FIX: Prioritize checking the nested 'requester' object first ***
+              const id = r.requester?.userId ?? r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
               return Number(id) === Number(userId);
             });
 
