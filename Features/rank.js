@@ -14,11 +14,6 @@ async function robloxLogin() {
     await noblox.setCookie(process.env.ROBLOX_COOKIE);
     console.log("[ROBLOX] Bot logged in successfully.");
     robloxLoggedIn = true;
-    
-    // --- TEMPORARY DEBUG LOG REMOVED ---
-    // The debug log has been removed as it confirmed the function name (handleJoinRequest) is correct.
-    // --- END TEMPORARY DEBUG LOG ---
-
   } catch (err) {
     console.log("[ROBLOX] Login failed:", err);
   }
@@ -60,76 +55,49 @@ module.exports.registerRankCommand = async (client, config) => {
 
       try {
         const userId = await noblox.getIdFromUsername(username);
-        const currentRank = await noblox.getRankInGroup(groupId, userId);
-        const isMember = currentRank > 0;
-
-        // --------------------- PENDING REQUEST LOGIC (PAGINATION & DEBUG) ---------------------
+        // Renamed to clarify we are getting the ID here
+        const currentRankId = await noblox.getRankInGroup(groupId, userId);
+        const isMember = currentRankId > 0;
+        
+        let currentRankName = "N/A";
+        if (isMember) {
+            // Get the actual role name for display
+            currentRankName = await noblox.getRankNameInGroup(groupId, userId);
+        }
+        
+        // --------------------- PENDING REQUEST LOGIC (PAGINATION) ---------------------
         let isPending = false;
         if (!isMember) {
           let cursor = null;
-          let pageCount = 0; // Added page counter
+          let pageCount = 0;
           
-          // Keep fetching until no cursor is returned (last page) or request is found
           while (!isPending) {
             pageCount++;
             let requestsData;
             
             try {
-                // Log the page being fetched
                 console.log(`[ROBLOX] Checking join request page ${pageCount}. Cursor: ${cursor || 'start'}`);
-                
-                // Fetch join requests, using the cursor if available
                 requestsData = await noblox.getJoinRequests(groupId, { cursor: cursor });
             } catch (apiError) {
-                // Log API error if fetching pages fails (e.g., rate limit)
                 console.error(`[ROBLOX API] Error fetching join requests for group ${groupId} on page ${pageCount}:`, apiError.message);
-                break; // Break the while loop on API error
+                break;
             }
 
-            // Get the array of requests, handling both raw array and paginated object formats
-            const requests = Array.isArray(requestsData)
-              ? requestsData
-              : requestsData?.data || [];
-            
+            const requests = Array.isArray(requestsData) ? requestsData : requestsData?.data || [];
             console.log(`[ROBLOX] Page ${pageCount} returned ${requests.length} requests.`);
             
-            // --- CRITICAL DEBUG LOGGING (Updated to find the ID and Username) ---
-            const foundUsers = requests.map(r => {
-                // *** FIX: Prioritize checking the nested 'requester' object first ***
-                const id = r.requester?.userId ?? r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
-                const uname = r.requester?.username ?? r.Username ?? r.username ?? r.user?.username ?? 'UnknownUser';
-                
-                // If we failed to find the ID, log the raw object structure
-                if (id === 0) {
-                    // Use a specific error tag so it's easy to find in the logs
-                    console.error("[ROBLOX DEBUG] Failed to extract ID/Username. Raw Request Object:", JSON.stringify(r));
-                }
-
-                return id > 0 ? `${uname} (${id})` : null;
-            }).filter(u => u);
-
-            if (foundUsers.length > 0) {
-                 console.log(`[ROBLOX] Found pending requests on page ${pageCount}: [${foundUsers.join(', ')}]`);
-            }
-            // -----------------------------------------------------------------------------
-
-            // If the current page is empty, or the group has no pending requests, break
             if (requests.length === 0) break;
 
-            // Check if the target user is in the current page of requests
             isPending = requests.some((r) => {
-              // *** FIX: Prioritize checking the nested 'requester' object first ***
               const id = r.requester?.userId ?? r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
               return Number(id) === Number(userId);
             });
 
-            // If the user was found, break immediately
             if (isPending) {
               console.log(`[ROBLOX] Found pending request for ${username} (${userId}) on page ${pageCount}.`);
               break;
             }
 
-            // Move to the next page if a cursor exists. If not, this was the last page.
             cursor = requestsData.nextPageCursor;
             if (!cursor) {
               console.log(`[ROBLOX] Reached the last page (${pageCount}).`);
@@ -138,64 +106,103 @@ module.exports.registerRankCommand = async (client, config) => {
           }
         }
         // ---------------------------------------------------------------
+        
+        // --- Custom Rank Status Field for New Embed Structure ---
+        let rankStatusValue = "";
+        if (isPending) {
+            rankStatusValue = `🟡 Pending Request (ID: ${currentRankId})`;
+        } else if (isMember) {
+            // Display Rank Name and ID
+            rankStatusValue = `🛡️ **${currentRankName}** (ID: ${currentRankId})`;
+        } else {
+            rankStatusValue = "❌ Not in Group";
+        }
 
         const embed = new EmbedBuilder()
-          .setColor("Blue")
-          .setTitle("Roblox User Info")
-          // Added thumbnail for visual context
+          // Aesthetic Change: Set color to null
+          .setColor(null) 
+          // New Title Format
+          .setTitle(`Username: ${username}`)
+          .setFooter({text: `Requested by ${interaction.user.tag}`}) 
+          .setTimestamp() 
+          // Thumbnail is already positioned well
           .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=420&height=420&format=png`)
           .addFields(
-            { name: "Username", value: username, inline: true },
-            { name: "Current Rank", value: isMember ? currentRank.toString() : "N/A", inline: true },
-            { name: "In Group", value: isMember ? "✅ Yes" : "❌ No", inline: true },
-            { name: "Pending Request", value: isPending ? "✅ Yes" : "❌ No", inline: true }
+            // Aesthetic Change: New combined Rank Field
+            { name: "Current Rank:", value: rankStatusValue, inline: false },
+            { name: "✨ Roblox ID", value: userId.toString(), inline: true },
+            { name: "✅ Group Member?", value: isMember ? "🟢 Yes" : "🔴 No", inline: true },
+            { name: "⏳ Join Request?", value: isPending ? "🟡 Yes" : "❌ No", inline: true }
           );
 
         // --------------------- DROPDOWN ---------------------
         const selectMenu = new StringSelectMenuBuilder()
           .setCustomId(`rankMenu_${username}`)
-          .setPlaceholder("Select an action")
           .setMinValues(1)
           .setMaxValues(1);
+          
+        let menuOptions = [];
 
-        // Add divisions (only rankable if member)
-        for (const divName of Object.keys(config.DIVISIONS)) {
-          const div = config.DIVISIONS[divName];
-          selectMenu.addOptions({
-            label: divName,
-            value: `rank_${divName}`,
-            emoji: div.emoji,
-            description: isMember ? `Set rank to ${divName}` : "User not in group (Cannot Rank)",
-            // Removed default property to prevent Discord API Error
-          });
-        }
-
-        // Add action for removing/denying
-        // Only show 'Exile Member' if they are currently a member.
         if (isMember) {
-           selectMenu.addOptions({
-              label: "Exile Member",
-              value: "remove",
-              description: "Remove the user from the group (Exile)",
+            // Aesthetic Change: Placeholder for members
+            selectMenu.setPlaceholder("Select a Rank or Action");
+
+            // User is a member, show Rank/Exile options
+            for (const divName of Object.keys(config.DIVISIONS)) {
+                const div = config.DIVISIONS[divName];
+                // Check for current rank to disable option if ID is 3, 6, or 9
+                const isCurrentAdministrativeRank = currentRankId === div.rankId && [3, 6, 9].includes(currentRankId);
+                
+                menuOptions.push({
+                    label: divName,
+                    value: `rank_${divName}`,
+                    emoji: div.emoji,
+                    // Aesthetic Change: Updated description based on disabled status
+                    description: isCurrentAdministrativeRank ? `Cannot change rank if user currently holds this role.` : `Promote/Set rank to ${divName}.`,
+                    disabled: isCurrentAdministrativeRank,
+                });
+            }
+
+            // Add Exile option
+            menuOptions.push({
+                label: "Exile Member",
+                value: "remove",
+                emoji: "🗑️",
+                description: "Permanently remove the user from the group.",
+            });
+
+        } else if (isPending) {
+            // Aesthetic Change: Placeholder for non-members with request
+            selectMenu.setPlaceholder("User not in Group - Select Request Action");
+            
+            // User is NOT a member, but has a pending request. Only show Accept.
+            menuOptions.push({
+                label: "Accept Join Request",
+                value: "accept",
+                emoji: "📥",
+                description: "Accept the pending join request (Sets to Rank 1).",
             });
         }
+        
+        // If the user is not a member and has no pending request, no menu options are added.
 
+        if (menuOptions.length > 0) {
+            selectMenu.addOptions(menuOptions);
+            const row = new ActionRowBuilder().addComponents(selectMenu);
 
-        // Accept join request if pending AND NOT member
-        if (isPending && !isMember) {
-          selectMenu.addOptions({
-            label: "Accept Join Request",
-            value: "accept",
-            description: "Accept the pending request",
-          });
+            return interaction.editReply({
+                embeds: [embed],
+                components: [row],
+            });
         }
-
-        const row = new ActionRowBuilder().addComponents(selectMenu);
-
+        
+        // If no actions are possible, reply with only the embed and no components.
         return interaction.editReply({
-          embeds: [embed],
-          components: [row],
+            embeds: [embed],
+            components: [],
         });
+
+
       } catch (err) {
         return interaction.editReply({
           content: `❌ Failed to fetch user: ${err.message}`,
@@ -205,13 +212,15 @@ module.exports.registerRankCommand = async (client, config) => {
 
     // --------------------- DROPDOWN HANDLER ---------------------
     if (interaction.isStringSelectMenu()) {
-      await interaction.deferUpdate(); // Defer update to get time for API calls
+      await interaction.deferUpdate(); 
 
       const username = interaction.customId.replace("rankMenu_", "");
       const selected = interaction.values[0];
 
-      let logMessage = ""; // Defined here so it's accessible by the catch block
+      let logMessage = ""; 
       let actionTitle = "Action Successful";
+      // Aesthetic Change: Use null color
+      let actionColor = null; 
 
       try {
         const userId = await noblox.getIdFromUsername(username);
@@ -223,38 +232,41 @@ module.exports.registerRankCommand = async (client, config) => {
           const rankId = config.DIVISIONS[division].rankId;
           await noblox.setRank(groupId, userId, rankId);
           actionTitle = "Ranked Successfully";
-          logMessage = `Ranked **${username}** to **${division}** (${rankId}).`;
+          // Aesthetic Change: Use Rank Name instead of ID
+          logMessage = `✅ **${username}** has been ranked to **${division}**.`;
         }
 
         // Handle 'remove' (Exile only)
         if (selected === "remove") {
-          // Fetch rank before exiling for accurate logging
-          const currentRank = await noblox.getRankInGroup(groupId, userId);
+          // Fetch rank name before exiling for accurate logging
+          const currentRankName = await noblox.getRankNameInGroup(groupId, userId);
           
-          // *** FIX: Changed setRank(..., 0) to the dedicated noblox.exile() function ***
           await noblox.exile(groupId, userId);
           actionTitle = "Exiled Successfully";
-          logMessage = `Exiled **${username}** (Previous Rank: ${currentRank}) from the group.`;
+          // Aesthetic Change: Use Rank Name instead of ID, and Red for destructive action
+          logMessage = `🗑️ **${username}** has been **Exiled** (Previous Rank: ${currentRankName}) from the group.`;
+          actionColor = 0xff0000; 
         }
 
         if (selected === "accept") {
-          // Corrected function name to handleJoinRequest
           await noblox.handleJoinRequest(groupId, userId, true);
           actionTitle = "Request Accepted Successfully";
-          logMessage = `Accepted join request for **${username}**. They should now be rank 1.`;
+          logMessage = `📥 **${username}**'s join request has been **Accepted** (Set to Rank 1).`;
+          actionColor = 0x00ff00;
         }
         
-        // If logMessage is still empty, it means an action was missed or invalid, but we proceed assuming a valid action was taken.
         if (!logMessage) {
             logMessage = `Performed action: **${selected}** on **${username}**.`;
         }
         
-        // --- 2. DISCORD RESPONSE LOGIC (This is what might be failing) ---
+        // --- 2. DISCORD RESPONSE LOGIC ---
 
         const successEmbed = new EmbedBuilder()
-          .setColor("Green")
+          // Aesthetic Change: Use dynamic color (or null if not defined by action)
+          .setColor(actionColor) 
           .setTitle(actionTitle)
           .setDescription(logMessage)
+          .setFooter({text: `Action performed by ${interaction.user.tag}`}) 
           .setTimestamp();
 
         // Send success message to the user
@@ -274,22 +286,21 @@ module.exports.registerRankCommand = async (client, config) => {
       } catch (err) {
         // --- 3. ERROR HANDLING LOGIC ---
         
-        // If logMessage has content, the Roblox action succeeded, but a Discord response (followUp, message.edit) failed.
         if (logMessage) {
             console.error(`[DISCORD API ERROR] Failed to send success followUp/edit message for successful action: ${logMessage}. Discord Error: ${err.message}`);
-            // We just log the secondary failure and DO NOT send a misleading "Action Failed" to the user.
             return;
         }
 
-        // If logMessage is empty, the action failed before or during the Roblox API call. This is a true failure.
         const failEmbed = new EmbedBuilder()
-          .setColor("Red")
-          .setTitle("Action Failed")
+          // Aesthetic Change: Use Red for failure, but set color to null
+          .setColor(null) 
+          .setTitle("❌ Action Failed")
           .addFields(
             { name: "Username", value: username, inline: true },
             { name: "Action", value: selected, inline: true },
-            { name: "Reason", value: err.message || "Unknown error occurred during API call." } // Fallback for cryptic messages
+            { name: "Reason", value: err.message || "Unknown error occurred during API call." }
           )
+          .setFooter({text: `Action failed for ${interaction.user.tag}`}) 
           .setTimestamp();
 
         // Report the failure to the user
