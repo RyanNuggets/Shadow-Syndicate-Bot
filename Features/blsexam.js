@@ -357,7 +357,7 @@ function registerExamHandlers(client, config) {
 
     // --- 1. Ready Event: Post Start Button ---
     // FIX APPLIED: Using client.once to ensure the button posts exactly once on bot connection.
-    client.once('ready', () => {
+    client.once('clientReady', () => {
         // Ensure config.json is loaded and has necessary data before posting
         if (config && config.CHANNELS && config.CHANNELS.BUTTON) {
             postStartButton(client, config);
