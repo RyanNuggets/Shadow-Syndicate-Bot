@@ -150,12 +150,26 @@ const getPanelContent = async (username, groupId, config, interactionUserTag = n
         }
     }
 
+    // --- NEW: Fetch Thumbnail URL using noblox.js function ---
+    let thumbnailUrl = null;
+    try {
+        // Use the noblox function as specified in the docs for maximum reliability
+        const thumbnailData = await noblox.getPlayerThumbnail([userId], 420, 'png', false, 'Headshot');
+        if (thumbnailData && thumbnailData[0] && thumbnailData[0].imageUrl) {
+            thumbnailUrl = thumbnailData[0].imageUrl;
+        }
+    } catch (e) {
+        console.error(`Failed to retrieve thumbnail via noblox for ID ${userId}: ${e.message}`);
+        // Keep thumbnailUrl null, Discord will gracefully ignore it
+    }
+
     const embed = new EmbedBuilder()
       .setColor(null) // No color for main embed
       .setTitle("Roblox Group Panel")
       .setFooter({text: interactionUserTag ? `Requested by ${interactionUserTag}` : `Status refreshed`}) // Conditional Footer
       .setTimestamp() 
-      .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=420&height=420&format=png`)
+      // Use the reliable URL fetched by the noblox function, defaulting to null if fetch fails
+      .setThumbnail(thumbnailUrl)
       .addFields(
         { name: "User:", value: username, inline: false },
         { name: "\u200b", value: "\u200b", inline: false }, // Blank spacer field added here
