@@ -43,7 +43,7 @@ module.exports.registerRankCommand = async (client, config) => {
       if (!interaction.member.roles.cache.has(requiredRole)) {
         return interaction.reply({
           content: "❌ You do not have permission to use this command.",
-          flags: 64, // ephemeral
+          ephemeral: true,
         });
       }
 
@@ -60,13 +60,17 @@ module.exports.registerRankCommand = async (client, config) => {
           .setStyle(ButtonStyle.Primary)
       );
 
-      await interaction.reply({ embeds: [embed], components: [row], flags: 64 });
+      await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
     }
 
     // ---------- Button Interaction ----------
     if (interaction.isButton()) {
+      // Handle "Enter User" button
       if (interaction.customId === "enterUser") {
         try {
+          // defer first to prevent 3s timeout
+          await interaction.deferReply({ ephemeral: true });
+
           const modal = new ModalBuilder()
             .setCustomId("usernameModal")
             .setTitle("Enter Roblox Username");
@@ -81,30 +85,25 @@ module.exports.registerRankCommand = async (client, config) => {
           const row = new ActionRowBuilder().addComponents(input);
           modal.addComponents(row);
 
-          // Show the modal
           await interaction.showModal(modal);
         } catch (err) {
           console.error("Failed to show modal:", err);
-          if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({
-              content: `❌ Failed to show modal: ${err.message}`,
-              flags: 64,
-            });
+          if (!interaction.replied) {
+            await interaction.reply({ content: `❌ Failed to show modal: ${err.message}`, ephemeral: true });
           } else {
-            await interaction.followUp({
-              content: `❌ Failed to show modal: ${err.message}`,
-              flags: 64,
-            });
+            await interaction.followUp({ content: `❌ Failed to show modal: ${err.message}`, ephemeral: true });
           }
         }
       }
 
-      // Rank / Remove buttons
+      // Handle rank/remove buttons
       if (interaction.customId.startsWith("rank_") || interaction.customId.startsWith("removeUser")) {
         const [action, division, username] = interaction.customId.split("_");
         const groupId = config.ROBLOX.GROUP_ID;
 
         try {
+          await interaction.deferReply({ ephemeral: true });
+
           const userId = await noblox.getIdFromUsername(username);
 
           if (action === "rank") {
@@ -120,7 +119,7 @@ module.exports.registerRankCommand = async (client, config) => {
             .setDescription(`Performed **${action}** on **${username}**.`)
             .setTimestamp();
 
-          await interaction.update({ embeds: [successEmbed], components: [] });
+          await interaction.editReply({ embeds: [successEmbed], components: [] });
 
           const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
           if (logChannel) logChannel.send({ embeds: [successEmbed] });
@@ -135,9 +134,9 @@ module.exports.registerRankCommand = async (client, config) => {
             .setTimestamp();
 
           if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({ embeds: [failEmbed], flags: 64 });
+            await interaction.reply({ embeds: [failEmbed], ephemeral: true });
           } else {
-            await interaction.followUp({ embeds: [failEmbed], flags: 64 });
+            await interaction.followUp({ embeds: [failEmbed], ephemeral: true });
           }
 
           const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
@@ -148,6 +147,8 @@ module.exports.registerRankCommand = async (client, config) => {
 
     // ---------- Modal Submit ----------
     if (interaction.isModalSubmit() && interaction.customId === "usernameModal") {
+      await interaction.deferReply({ ephemeral: true });
+
       const username = interaction.fields.getTextInputValue("usernameInput");
       const groupId = config.ROBLOX.GROUP_ID;
 
@@ -170,7 +171,6 @@ module.exports.registerRankCommand = async (client, config) => {
 
         const buttons = new ActionRowBuilder();
 
-        // Rank buttons
         for (const divisionKey of ["DHS", "CHP", "LASD"]) {
           const division = config.DIVISIONS[divisionKey];
           buttons.addComponents(
@@ -182,7 +182,6 @@ module.exports.registerRankCommand = async (client, config) => {
           );
         }
 
-        // Remove button
         buttons.addComponents(
           new ButtonBuilder()
             .setCustomId(`removeUser_${username}`)
@@ -192,9 +191,9 @@ module.exports.registerRankCommand = async (client, config) => {
             .setDisabled(!isMember && !isPending)
         );
 
-        await interaction.reply({ embeds: [infoEmbed], components: [buttons], flags: 64 });
+        await interaction.editReply({ embeds: [infoEmbed], components: [buttons] });
       } catch (err) {
-        await interaction.reply({ content: `❌ Failed to fetch user: ${err.message}`, flags: 64 });
+        await interaction.editReply({ content: `❌ Failed to fetch user: ${err.message}`, ephemeral: true });
       }
     }
   });
