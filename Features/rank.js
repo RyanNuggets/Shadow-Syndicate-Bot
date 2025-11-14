@@ -1,6 +1,6 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, InteractionType } = require("discord.js");
 const Roblox = require("noblox.js"); // make sure noblox.js is logged in
-const { EMOJIS } = require("./config.json");
+const { EMOJIS } = require("../config.json");
 
 module.exports = {
     name: "rank",
