@@ -5,9 +5,6 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  TextInputBuilder,
-  TextInputStyle,
-  ModalBuilder,
   EmbedBuilder,
 } = require("discord.js");
 
@@ -29,16 +26,18 @@ module.exports.registerRankCommand = async (client, config) => {
 
   const rankCommand = new SlashCommandBuilder()
     .setName("rank")
-    .setDescription("Open the rank panel to manage Roblox users.");
+    .setDescription("Manage a Roblox user")
+    .addStringOption(option =>
+      option
+        .setName("user")
+        .setDescription("Roblox username")
+        .setRequired(true)
+    );
 
   client.application.commands.create(rankCommand);
 
   client.on("interactionCreate", async (interaction) => {
-    if (
-      !interaction.isChatInputCommand() &&
-      !interaction.isButton() &&
-      !interaction.isModalSubmit()
-    ) return;
+    if (!interaction.isChatInputCommand() && !interaction.isButton()) return;
 
     const groupId = config.ROBLOX.GROUP_ID;
 
@@ -48,32 +47,11 @@ module.exports.registerRankCommand = async (client, config) => {
       if (!interaction.member.roles.cache.has(requiredRole)) {
         return interaction.reply({
           content: "❌ You do not have permission to use this command.",
-          flags: 64, // EPHEMERAL
+          ephemeral: true,
         });
       }
 
-      // Directly show the modal
-      const modal = new ModalBuilder()
-        .setCustomId("usernameModal")
-        .setTitle("Enter Roblox Username");
-
-      const input = new TextInputBuilder()
-        .setCustomId("usernameInput")
-        .setLabel("Roblox Username")
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder("Username")
-        .setRequired(true);
-
-      const row = new ActionRowBuilder().addComponents(input);
-      modal.addComponents(row);
-
-      return interaction.showModal(modal);
-    }
-
-    // --------------------- MODAL SUBMIT ---------------------
-    if (interaction.isModalSubmit() && interaction.customId === "usernameModal") {
-      await interaction.deferReply({ flags: 64 });
-      const username = interaction.fields.getTextInputValue("usernameInput");
+      const username = interaction.options.getString("user");
 
       try {
         const userId = await noblox.getIdFromUsername(username);
@@ -81,9 +59,7 @@ module.exports.registerRankCommand = async (client, config) => {
         const isMember = currentRank > 0;
 
         const requests = await noblox.getJoinRequests(groupId);
-        const isPending =
-          Array.isArray(requests) &&
-          requests.some((r) => Number(r.UserId) === Number(userId));
+        const isPending = requests.some(r => Number(r.UserId) === Number(userId));
 
         const infoEmbed = new EmbedBuilder()
           .setColor("Blue")
@@ -96,30 +72,20 @@ module.exports.registerRankCommand = async (client, config) => {
 
         const buttons = new ActionRowBuilder();
 
-        // Divisions buttons
+        // Division rank buttons
         for (const div of Object.keys(config.DIVISIONS)) {
           const d = config.DIVISIONS[div];
           buttons.addComponents(
             new ButtonBuilder()
               .setCustomId(`rank_${div}_${username}`)
               .setLabel(div)
-              .setEmoji(d.emoji) // must be {id, name} object for custom emoji
+              .setEmoji(d.emoji)
               .setStyle(ButtonStyle.Primary)
               .setDisabled(!isMember)
           );
         }
 
-        // Remove From Group button
-        buttons.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`removeUser_${username}`)
-            .setLabel("Remove From Group")
-            .setEmoji(config.EMOJIS.REMOVE)
-            .setStyle(ButtonStyle.Danger)
-            .setDisabled(!isMember && !isPending)
-        );
-
-        // Accept Group Request button if pending
+        // Remove / Accept buttons
         if (isPending && !isMember) {
           buttons.addComponents(
             new ButtonBuilder()
@@ -128,22 +94,29 @@ module.exports.registerRankCommand = async (client, config) => {
               .setEmoji("✅")
               .setStyle(ButtonStyle.Success)
           );
+        } else {
+          buttons.addComponents(
+            new ButtonBuilder()
+              .setCustomId(`removeUser_${username}`)
+              .setLabel("Remove From Group")
+              .setEmoji(config.EMOJIS.REMOVE)
+              .setStyle(ButtonStyle.Danger)
+              .setDisabled(!isMember)
+          );
         }
 
-        return interaction.editReply({
-          embeds: [infoEmbed],
-          components: [buttons],
-        });
+        await interaction.reply({ embeds: [infoEmbed], components: [buttons] });
       } catch (err) {
-        return interaction.editReply({
+        return interaction.reply({
           content: `❌ Failed to fetch user: ${err.message}`,
+          ephemeral: true,
         });
       }
     }
 
     // --------------------- BUTTON HANDLER ---------------------
     if (interaction.isButton()) {
-      await interaction.deferReply({ flags: 64 });
+      await interaction.deferReply({ ephemeral: true });
 
       const [action, division, ...rest] = interaction.customId.split("_");
       const username = rest.join("_");
