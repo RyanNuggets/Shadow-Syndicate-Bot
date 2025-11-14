@@ -46,23 +46,26 @@ module.exports.registerRankCommand = async (client, config) => {
       if (!interaction.member.roles.cache.has(requiredRole)) {
         return interaction.reply({
           content: "❌ You do not have permission to use this command.",
-          flags: 64,
+          ephemeral: true,
         });
       }
 
       const username = interaction.options.getString("user");
-
-      await interaction.deferReply({ flags: 64 });
 
       try {
         const userId = await noblox.getIdFromUsername(username);
         const currentRank = await noblox.getRankInGroup(groupId, userId);
         const isMember = currentRank > 0;
 
+        // Get join requests
         const requestsRaw = await noblox.getJoinRequests(groupId);
-        const requests = Array.isArray(requestsRaw) ? requestsRaw : requestsRaw.data || [];
+        let requests = [];
+        if (Array.isArray(requestsRaw)) requests = requestsRaw;
+        else if (requestsRaw?.data) requests = requestsRaw.data;
+
         const isPending = requests.some(r => Number(r.UserId) === Number(userId));
 
+        // Build info embed
         const infoEmbed = new EmbedBuilder()
           .setColor("Blue")
           .setTitle("Roblox User Info")
@@ -72,22 +75,22 @@ module.exports.registerRankCommand = async (client, config) => {
             { name: "Pending Request", value: isPending ? "✅ Yes" : "❌ No", inline: true }
           );
 
+        // Buttons
         const buttons = new ActionRowBuilder();
 
-        // Divisions buttons
         for (const div of Object.keys(config.DIVISIONS)) {
           const d = config.DIVISIONS[div];
           buttons.addComponents(
             new ButtonBuilder()
               .setCustomId(`rank_${div}_${username}`)
               .setLabel(div)
-              .setEmoji(d.emoji) // should be {id,name} for custom emoji
+              .setEmoji(d.emoji)
               .setStyle(ButtonStyle.Primary)
               .setDisabled(!isMember)
           );
         }
 
-        // Remove From Group button
+        // Remove From Group
         buttons.addComponents(
           new ButtonBuilder()
             .setCustomId(`removeUser_${username}`)
@@ -97,7 +100,7 @@ module.exports.registerRankCommand = async (client, config) => {
             .setDisabled(!isMember && !isPending)
         );
 
-        // Accept Group Request button if pending
+        // Accept Group Request
         if (isPending && !isMember) {
           buttons.addComponents(
             new ButtonBuilder()
@@ -108,21 +111,21 @@ module.exports.registerRankCommand = async (client, config) => {
           );
         }
 
-        return interaction.editReply({
+        return interaction.reply({
           embeds: [infoEmbed],
           components: [buttons],
+          ephemeral: false,
         });
       } catch (err) {
-        return interaction.editReply({
+        return interaction.reply({
           content: `❌ Failed to fetch user: ${err.message}`,
+          ephemeral: true,
         });
       }
     }
 
     // --------------------- BUTTON HANDLER ---------------------
     if (interaction.isButton()) {
-      await interaction.deferReply({ flags: 64 });
-
       const [action, division, ...rest] = interaction.customId.split("_");
       const username = rest.join("_");
 
@@ -148,7 +151,8 @@ module.exports.registerRankCommand = async (client, config) => {
           .setDescription(`Performed **${action}** on **${username}**.`)
           .setTimestamp();
 
-        await interaction.editReply({ embeds: [successEmbed], components: [] });
+        // Update original message safely
+        await interaction.update({ embeds: [successEmbed], components: [] });
 
         const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
         if (logChannel) logChannel.send({ embeds: [successEmbed] });
@@ -162,7 +166,7 @@ module.exports.registerRankCommand = async (client, config) => {
           )
           .setTimestamp();
 
-        await interaction.editReply({ embeds: [failEmbed], components: [] });
+        await interaction.update({ embeds: [failEmbed], components: [] });
 
         const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
         if (logChannel) logChannel.send({ embeds: [failEmbed] });
