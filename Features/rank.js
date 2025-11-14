@@ -184,9 +184,10 @@ const getPanelContent = async (username, groupId, config, interactionUserTag = n
       // Use the reliable URL fetched by the noblox function, defaulting to null if fetch fails
       .setThumbnail(thumbnailUrl)
       .addFields(
-        { name: "User:", value: username, inline: false },
-        { name: "\u200b", value: "\u200b", inline: false }, // Blank spacer field added here
-        { name: "Current Rank:", value: rankStatusValue, inline: false }
+        // FIELDS ARE NOW INLINE
+        { name: "User:", value: username, inline: true }, // Changed to inline: true
+        { name: "\u200b", value: "\u200b", inline: true }, // Inline Spacer for visual separation/3-column layout
+        { name: "Current Rank:", value: rankStatusValue, inline: true } // Changed to inline: true
       );
 
     const componentRows = buildCategoryComponents(username, isMember, isPending);
