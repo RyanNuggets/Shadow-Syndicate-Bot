@@ -58,7 +58,7 @@ module.exports.registerRankCommand = async (client, config) => {
         const currentRank = await noblox.getRankInGroup(groupId, userId);
         const isMember = currentRank > 0;
 
-        // --------------------- FIXED PENDING REQUEST LOGIC (PAGINATION & DEBUG) ---------------------
+        // --------------------- PENDING REQUEST LOGIC (PAGINATION & DEBUG) ---------------------
         let isPending = false;
         if (!isMember) {
           let cursor = null;
@@ -88,10 +88,18 @@ module.exports.registerRankCommand = async (client, config) => {
             
             console.log(`[ROBLOX] Page ${pageCount} returned ${requests.length} requests.`);
             
-            // --- CRITICAL DEBUG LOGGING: Print all Usernames and IDs found on this page ---
+            // --- CRITICAL DEBUG LOGGING: Print all Usernames and IDs found on this page or the raw object if we fail ---
             const foundUsers = requests.map(r => {
+                // Check all known fields where ID might reside
                 const id = r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
                 const uname = r.Username ?? r.username ?? r.user?.username ?? 'UnknownUser';
+                
+                // If we failed to find the ID, log the raw object structure
+                if (id === 0) {
+                    // Use a specific error tag so it's easy to find in the logs
+                    console.error("[ROBLOX DEBUG] Failed to extract ID/Username. Raw Request Object:", JSON.stringify(r));
+                }
+
                 return id > 0 ? `${uname} (${id})` : null;
             }).filter(u => u);
 
