@@ -20,33 +20,47 @@ module.exports.registerRankCommand = async (client, config) => {
 
     await robloxLogin();
 
-    // Register slash command
+    // Define /rank command
     const rankCommand = new SlashCommandBuilder()
         .setName("rank")
         .setDescription("Rank a Roblox user to the fixed role.")
         .addStringOption(option =>
-            option.setName("user")
+            option
+                .setName("user")
                 .setDescription("Roblox username to rank")
                 .setRequired(true)
         );
 
+    // Register command globally
     client.application.commands.create(rankCommand);
 
     client.on("interactionCreate", async (interaction) => {
         if (!interaction.isChatInputCommand()) return;
         if (interaction.commandName !== "rank") return;
 
+        // Permission check
+        const requiredRole = config.ROBLOX.RANK_PERMS;
+        if (!interaction.member.roles.cache.has(requiredRole)) {
+            return interaction.reply({
+                content: "❌ You do not have permission to use this command.",
+                ephemeral: true
+            });
+        }
+
         const username = interaction.options.getString("user");
-        const groupId = config.ROBLOX.GROUP_ID; 
-        const fixedRoleID = config.ROBLOX.RANK_ROLE_ID; // YOU SET THIS IN CONFIG
-        
-        await interaction.reply({ content: `Processing rank for **${username}**...`, ephemeral: true });
+        const groupId = config.ROBLOX.GROUP_ID;
+        const fixedRoleID = config.ROBLOX.RANK_ROLE_ID;
+
+        await interaction.reply({
+            content: `⏳ Processing rank for **${username}**...`,
+            ephemeral: true
+        });
 
         try {
-            // Convert username → userId
+            // Get Roblox user ID
             const userId = await noblox.getIdFromUsername(username);
 
-            // Rank user
+            // Apply rank
             await noblox.setRank(groupId, userId, fixedRoleID);
 
             // Success embed
@@ -54,27 +68,17 @@ module.exports.registerRankCommand = async (client, config) => {
                 .setColor("Green")
                 .setTitle("Rank Successful")
                 .addFields(
-                    { name: "User", value: username },
-                    { name: "Rank ID", value: fixedRoleID.toString() },
-                    { name: "Status", value: "User has been ranked successfully." }
-                );
-
-            await interaction.editReply({ content: "", embeds: [successEmbed] });
-
-            // Logging embed
-            const logEmbed = new EmbedBuilder()
-                .setColor("Blue")
-                .setTitle("Rank Log")
-                .addFields(
-                    { name: "Ranked By", value: `${interaction.user.tag}` },
-                    { name: "Target User", value: username },
-                    { name: "Rank ID", value: fixedRoleID.toString() },
-                    { name: "Result", value: "Success" }
+                    { name: "Roblox User", value: username, inline: true },
+                    { name: "New Rank ID", value: fixedRoleID.toString(), inline: true },
+                    { name: "Ranked By", value: `<@${interaction.user.id}>`, inline: false }
                 )
                 .setTimestamp();
 
-            const logChannel = client.channels.cache.get(config.CHANNELS.LOGS);
-            if (logChannel) logChannel.send({ embeds: [logEmbed] });
+            await interaction.editReply({ content: "", embeds: [successEmbed] });
+
+            // Send log to rank logs channel
+            const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
+            if (logChannel) logChannel.send({ embeds: [successEmbed] });
 
         } catch (err) {
             console.log("RANK FAILED:", err);
@@ -83,11 +87,16 @@ module.exports.registerRankCommand = async (client, config) => {
                 .setColor("Red")
                 .setTitle("Rank Failed")
                 .addFields(
-                    { name: "User", value: username },
-                    { name: "Reason", value: "User not found or not in group." }
-                );
+                    { name: "Roblox User", value: username },
+                    { name: "Reason", value: err.message || "Unknown error" },
+                    { name: "Requested By", value: `<@${interaction.user.id}>` }
+                )
+                .setTimestamp();
 
             await interaction.editReply({ content: "", embeds: [failEmbed] });
+
+            const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
+            if (logChannel) logChannel.send({ embeds: [failEmbed] });
         }
     });
 };
