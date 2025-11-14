@@ -52,7 +52,7 @@ function registerLogArrestCommand(client, config) {
     if (client.isReady()) {
         registerCommand();
     } else {
-        client.once('ready', registerCommand);
+        client.once('clientReady', registerCommand);
     }
 
     client.on('interactionCreate', async (interaction) => {
