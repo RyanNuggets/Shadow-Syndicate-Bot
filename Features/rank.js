@@ -4,6 +4,8 @@ const {
   ActionRowBuilder,
   StringSelectMenuBuilder,
   EmbedBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } = require("discord.js");
 
 let robloxLoggedIn = false;
@@ -32,13 +34,52 @@ const getRankNameFromId = (rankId, configDivisions) => {
   return rankId === 1 ? "Member" : "Unknown Rank";
 };
 
+// Helper function to build the initial category components (used for /rank and 'Back' button)
+const buildCategoryComponents = (username, isMember, isPending) => {
+  const categorySelectMenu = new StringSelectMenuBuilder()
+      .setCustomId(`categorySelect_${username}`)
+      .setMinValues(1)
+      .setMaxValues(1)
+      .setPlaceholder("Select a Rank Action Category...");
+
+  let categoryOptions = [];
+
+  // Option 1: Department Ranks (Rank Divisions - Requires membership)
+  if (isMember) {
+      categoryOptions.push({
+          label: "Department Ranks", // UPDATED LABEL
+          value: "category_ranks",
+          description: "Promote or demote the user across department ranks.",
+          emoji: "🛡️"
+      });
+  }
+
+  // Option 2: Administrative Actions (Exile/Accept - shown conditionally)
+  if (isMember || isPending) {
+      categoryOptions.push({
+          label: "Administrative Actions", // UPDATED LABEL
+          value: "category_actions",
+          description: "Handle Exiling a member or accepting a Join Request.",
+          emoji: "⚙️"
+      });
+  }
+
+  if (categoryOptions.length > 0) {
+      categorySelectMenu.addOptions(categoryOptions);
+      return [new ActionRowBuilder().addComponents(categorySelectMenu)];
+  }
+  
+  return [];
+};
+
 
 module.exports.registerRankCommand = async (client, config) => {
   await robloxLogin();
 
+  const groupId = config.ROBLOX.GROUP_ID;
+
   const rankCommand = new SlashCommandBuilder()
     .setName("rank")
-    // Aesthetic Improvement: More descriptive command name
     .setDescription("View a user's status and manage their rank, exile, or join request.")
     .addStringOption((option) =>
       option
@@ -47,15 +88,13 @@ module.exports.registerRankCommand = async (client, config) => {
         .setRequired(true)
     );
 
-  // This line might throw an error if client.application is not ready, adding a safety check.
   if (client.application && client.application.commands) {
     await client.application.commands.create(rankCommand);
   }
 
   client.on("interactionCreate", async (interaction) => {
-    const groupId = config.ROBLOX.GROUP_ID;
 
-    // --------------------- SLASH COMMAND ---------------------
+    // --------------------- SLASH COMMAND (Stage 1: Initial Lookup + Category Dropdown) ---------------------
     if (interaction.isChatInputCommand() && interaction.commandName === "rank") {
       const requiredRole = config.COMMANDS.RANK_PERMISSION_ROLE;
       if (!interaction.member.roles.cache.has(requiredRole)) {
@@ -73,146 +112,61 @@ module.exports.registerRankCommand = async (client, config) => {
         const currentRankId = await noblox.getRankInGroup(groupId, userId);
         const isMember = currentRankId > 0;
         
-        // Optimization: Get the actual role name using the helper function
         let currentRankName = getRankNameFromId(currentRankId, config.DIVISIONS);
 
-        // --------------------- PENDING REQUEST LOGIC (PAGINATION) ---------------------
+        // --- PENDING REQUEST LOGIC (PAGINATION) ---
         let isPending = false;
         if (!isMember) {
           let cursor = null;
           let pageCount = 0;
-          
+          // Loop through requests until user found or cursor runs out
+          // This loop is kept here because it's required for the initial embed status
           while (!isPending) {
             pageCount++;
             let requestsData;
-            
-            try {
-                console.log(`[ROBLOX] Checking join request page ${pageCount}. Cursor: ${cursor || 'start'}`);
-                requestsData = await noblox.getJoinRequests(groupId, { cursor: cursor });
-            } catch (apiError) {
-                console.error(`[ROBLOX API] Error fetching join requests for group ${groupId} on page ${pageCount}:`, apiError.message);
-                break;
-            }
-
+            try { requestsData = await noblox.getJoinRequests(groupId, { cursor: cursor }); } catch (e) { break; }
             const requests = Array.isArray(requestsData) ? requestsData : requestsData?.data || [];
-            console.log(`[ROBLOX] Page ${pageCount} returned ${requests.length} requests.`);
-            
             if (requests.length === 0) break;
-
             isPending = requests.some((r) => {
               const id = r.requester?.userId ?? r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
               return Number(id) === Number(userId);
             });
-
-            if (isPending) {
-              console.log(`[ROBLOX] Found pending request for ${username} (${userId}) on page ${pageCount}.`);
-              break;
-            }
-
+            if (isPending) break;
             cursor = requestsData.nextPageCursor;
-            if (!cursor) {
-              console.log(`[ROBLOX] Reached the last page (${pageCount}).`);
-              break; 
-            }
+            if (!cursor) break; 
           }
         }
-        // ---------------------------------------------------------------
         
-        // --- Custom Rank Status Field for New Embed Structure ---
+        // --- SIMPLIFIED RANK STATUS VALUE (Handles all 3 states: Member, Pending, Not In Group) ---
         let rankStatusValue = "";
         if (isPending) {
-            rankStatusValue = `🟡 Pending Request (ID: ${currentRankId})`;
+            rankStatusValue = `Pending Request`;
         } else if (isMember) {
-            // Display Rank Name and ID
-            rankStatusValue = `🛡️ **${currentRankName}** (ID: ${currentRankId})`;
+            // User is a member, show their rank name
+            rankStatusValue = `${currentRankName}`;
         } else {
-            rankStatusValue = "❌ Not in Group";
+            // Not a member and no pending request
+            rankStatusValue = "Not in Group";
         }
 
         const embed = new EmbedBuilder()
-          // AESTHETIC FIX: Set color to null as requested for the main lookup embed
-          .setColor(null) 
-          // New Title Format
-          .setTitle(`Username: ${username}`)
+          .setColor(null) // No color for main embed
+          .setTitle(username) // Simplified title: just the username
           .setFooter({text: `Requested by ${interaction.user.tag}`}) 
           .setTimestamp() 
-          // Thumbnail is already positioned well
           .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=420&height=420&format=png`)
           .addFields(
-            // Aesthetic Change: New combined Rank Field
-            { name: "Current Rank:", value: rankStatusValue, inline: false },
-            { name: "✨ Roblox ID", value: userId.toString(), inline: true },
-            { name: "✅ Group Member?", value: isMember ? "🟢 Yes" : "🔴 No", inline: true },
-            { name: "⏳ Join Request?", value: isPending ? "🟡 Yes" : "❌ No", inline: true }
+            // Simplified fields: just the rank status (which now includes membership status)
+            { name: "Current Rank:", value: rankStatusValue, inline: false }
           );
 
-        // --------------------- DROPDOWN ---------------------
-        const selectMenu = new StringSelectMenuBuilder()
-          .setCustomId(`rankMenu_${username}`)
-          .setMinValues(1)
-          .setMaxValues(1);
-          
-        let menuOptions = [];
-
-        if (isMember) {
-            // Aesthetic Change: Placeholder for members
-            selectMenu.setPlaceholder("Select a Rank or Action");
-
-            // User is a member, show Rank/Exile options
-            for (const divName of Object.keys(config.DIVISIONS)) {
-                const div = config.DIVISIONS[divName];
-                // Check for current rank to disable option if ID is 3, 6, or 9
-                const isCurrentAdministrativeRank = currentRankId === div.rankId && [3, 6, 9].includes(currentRankId);
-                
-                menuOptions.push({
-                    label: divName,
-                    value: `rank_${divName}`,
-                    emoji: div.emoji,
-                    // Aesthetic Change: Updated description based on disabled status
-                    description: isCurrentAdministrativeRank ? `Cannot change rank if user currently holds this role.` : `Promote/Set rank to ${divName}.`,
-                    disabled: isCurrentAdministrativeRank,
-                });
-            }
-
-            // Add Exile option
-            menuOptions.push({
-                label: "Exile Member",
-                value: "remove",
-                emoji: "🗑️",
-                description: "Permanently remove the user from the group.",
-            });
-
-        } else if (isPending) {
-            // Aesthetic Change: Placeholder for non-members with request
-            selectMenu.setPlaceholder("User not in Group - Select Request Action");
-            
-            // User is NOT a member, but has a pending request. Only show Accept.
-            menuOptions.push({
-                label: "Accept Join Request",
-                value: "accept",
-                emoji: "📥",
-                description: "Accept the pending join request (Sets to Rank 1).",
-            });
-        }
+        // Stage 1: Generate the Category Selection Dropdown
+        const componentRows = buildCategoryComponents(username, isMember, isPending);
         
-        // If the user is not a member and has no pending request, no menu options are added.
-
-        if (menuOptions.length > 0) {
-            selectMenu.addOptions(menuOptions);
-            const row = new ActionRowBuilder().addComponents(selectMenu);
-
-            return interaction.editReply({
-                embeds: [embed],
-                components: [row],
-            });
-        }
-        
-        // If no actions are possible, reply with only the embed and no components.
         return interaction.editReply({
             embeds: [embed],
-            components: [],
+            components: componentRows,
         });
-
 
       } catch (err) {
         return interaction.editReply({
@@ -221,110 +175,229 @@ module.exports.registerRankCommand = async (client, config) => {
       }
     }
 
-    // --------------------- DROPDOWN HANDLER ---------------------
-    if (interaction.isStringSelectMenu()) {
+    // --------------------- DROPDOWN HANDLER (Stage 2: Category Selection -> Button Generation) ---------------------
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('categorySelect_')) {
       await interaction.deferUpdate(); 
 
-      const username = interaction.customId.replace("rankMenu_", "");
-      const selected = interaction.values[0];
+      const username = interaction.customId.replace("categorySelect_", "");
+      const selectedCategory = interaction.values[0];
+      const isRanksCategory = selectedCategory === "category_ranks";
+      const isActionsCategory = selectedCategory === "category_actions";
 
-      let logMessage = ""; 
-      let actionTitle = "Action Successful";
-      // Aesthetic Change: Define action color, default to Green for positive actions
-      let actionColor = 0x4CAF50; // Success Green
+      // Re-fetch essential data for component generation
+      const userId = await noblox.getIdFromUsername(username);
+      const currentRankId = await noblox.getRankInGroup(groupId, userId);
+      const isMember = currentRankId > 0;
+      
+      let actionButtons = [];
+      const buttonRows = [];
+      const maxButtonsPerRow = 5;
 
-      try {
-        const userId = await noblox.getIdFromUsername(username);
+      if (isRanksCategory && isMember) {
+          // Generate Buttons for all divisions
+          for (const divName of Object.keys(config.DIVISIONS)) {
+              const div = config.DIVISIONS[divName];
+              const isCurrentAdministrativeRank = currentRankId === div.rankId && [3, 6, 9].includes(currentRankId);
+              
+              actionButtons.push(
+                  new ButtonBuilder()
+                      .setCustomId(`action_rank_${divName}_${username}`) // Format: action_rank_[divName]_[username]
+                      .setLabel(divName)
+                      .setStyle(ButtonStyle.Secondary)
+                      .setDisabled(isCurrentAdministrativeRank)
+              );
+          }
+      } else if (isActionsCategory) {
+          // --- Re-check PENDING status for the Accept Button ---
+          let isPending = false; 
+          if (!isMember) {
+              const requestsData = await noblox.getJoinRequests(groupId, { limit: 50 }); // Check first 50 for quick lookup
+              const requests = Array.isArray(requestsData) ? requestsData : requestsData?.data || [];
+              isPending = requests.some((r) => {
+                   const id = r.requester?.userId ?? r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
+                   return Number(id) === Number(userId);
+              });
+          }
 
-        // Fetch rank ID/Name BEFORE action for logging the rank change
-        const previousRankId = await noblox.getRankInGroup(groupId, userId);
-        const previousRankName = getRankNameFromId(previousRankId, config.DIVISIONS);
-        
-        // --- 1. PERFORM ROBLOX ACTION (Success sets logMessage) ---
-
-        if (selected.startsWith("rank_")) {
-          const division = selected.replace("rank_", "");
-          const rankId = config.DIVISIONS[division].rankId;
-          await noblox.setRank(groupId, userId, rankId);
-          actionTitle = "Rank Change Successful";
-          const newRankName = division; // New rank name is the division name
+          if (!isMember && isPending) {
+              actionButtons.push(
+                  new ButtonBuilder()
+                      .setCustomId(`action_accept_${username}`) // Format: action_accept_[username]
+                      .setLabel('Accept Join Request')
+                      .setStyle(ButtonStyle.Success)
+                      .setEmoji('📥')
+              );
+          }
           
-          // Aesthetic & Logging Improvement: Log the rank change
-          logMessage = `✅ **${username}** ranked from **${previousRankName}** to **${newRankName}**.`;
-        }
+          if (isMember) {
+              actionButtons.push(
+                  new ButtonBuilder()
+                      .setCustomId(`action_remove_${username}`) // Format: action_remove_[username]
+                      .setLabel('Exile Member')
+                      .setStyle(ButtonStyle.Danger)
+                      .setEmoji('🗑️')
+              );
+          }
+      }
+      
+      // Organize buttons into rows of max 5
+      for (let i = 0; i < actionButtons.length; i += maxButtonsPerRow) {
+          buttonRows.push(new ActionRowBuilder().addComponents(actionButtons.slice(i, i + maxButtonsPerRow)));
+      }
 
-        // Handle 'remove' (Exile only)
-        if (selected === "remove") {
-          
-          await noblox.exile(groupId, userId);
-          actionTitle = "Exiled Successfully";
-          
-          // Aesthetic Change: Use Red for destructive action
-          actionColor = 0xFF0000; 
-          logMessage = `🗑️ **${username}** has been **Exiled** (Previous Rank: ${previousRankName}) from the group.`;
-        }
+      // Add 'Back' button row (Essential for UX)
+      buttonRows.push(new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+              .setCustomId(`action_back_${username}`)
+              .setLabel('⬅️ Back to Categories')
+              .setStyle(ButtonStyle.Secondary)
+      ));
 
-        if (selected === "accept") {
-          await noblox.handleJoinRequest(groupId, userId, true);
-          actionTitle = "Request Accepted Successfully";
-          logMessage = `📥 **${username}**'s join request has been **Accepted** (Set to Rank 1 / Member).`;
-        }
+      const title = selectedCategory.replace('category_', '').replace('_', ' ');
+
+      // Edit the original message to replace the dropdown with buttons
+      await interaction.message.edit({
+          content: `Select an action for **${username}** in the \`${title.toUpperCase()}\` section.`,
+          components: buttonRows
+      });
+      return;
+    }
+
+    // --------------------- BUTTON HANDLER (Stage 3: Action Execution / Back) ---------------------
+    if (interaction.isButton()) {
+        await interaction.deferUpdate(); 
         
-        if (!logMessage) {
-            logMessage = `Performed action: **${selected}** on **${username}**.`;
-        }
+        // Custom ID format: action_[type]_[username] or action_rank_[divName]_[username]
+        const customIdParts = interaction.customId.split('_');
         
-        // --- 2. DISCORD RESPONSE LOGIC ---
+        if (customIdParts[0] !== 'action') return; // Not a rank/exile button
 
-        const successEmbed = new EmbedBuilder()
-          // Aesthetic Change: Use dynamic color for the reply/log embed
-          .setColor(actionColor) 
-          .setTitle(actionTitle)
-          .setDescription(logMessage)
-          .setFooter({text: `Action performed by ${interaction.user.tag}`}) 
-          .setTimestamp();
-
-        // Send success message to the user
-        await interaction.followUp({
-          embeds: [successEmbed],
-          components: [],
-          flags: 64, // EPHEMERAL
-        });
-
-        // Send success message to the logs channel
-        const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
-        if (logChannel) logChannel.send({ embeds: [successEmbed] });
-
-        // Edit the original message to remove the dropdown
-        await interaction.message.edit({ components: [] });
-
-      } catch (err) {
-        // --- 3. ERROR HANDLING LOGIC ---
+        const actionType = customIdParts[1]; // back, rank, accept, remove
+        const username = customIdParts.slice(-1)[0];
         
-        if (logMessage) {
-            console.error(`[DISCORD API ERROR] Failed to send success followUp/edit message for successful action: ${logMessage}. Discord Error: ${err.message}`);
+        // --- 3A. HANDLE BACK BUTTON ---
+        if (actionType === 'back') {
+            const userId = await noblox.getIdFromUsername(username);
+            const currentRankId = await noblox.getRankInGroup(groupId, userId);
+            const isMember = currentRankId > 0;
+            
+            // Re-check PENDING status for the Accept Button visibility on the initial menu
+            let isPending = false; 
+            if (!isMember) {
+                const requestsData = await noblox.getJoinRequests(groupId, { limit: 10 }); // Quick check
+                const requests = Array.isArray(requestsData) ? requestsData : requestsData?.data || [];
+                isPending = requests.some((r) => {
+                     const id = r.requester?.userId ?? r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
+                     return Number(id) === Number(userId);
+                });
+            }
+
+            const componentRows = buildCategoryComponents(username, isMember, isPending);
+
+            // Get original embed (first embed in the message)
+            const originalEmbed = interaction.message.embeds[0];
+            
+            // Edit message to revert to the Category Dropdown
+            await interaction.message.edit({
+                content: null, // Clear the temp content
+                embeds: [originalEmbed], 
+                components: componentRows
+            });
             return;
         }
 
-        const failEmbed = new EmbedBuilder()
-          // Aesthetic Change: Use Red for true failure
-          .setColor(0xFF0000) 
-          .setTitle("❌ Action Failed")
-          .addFields(
-            { name: "Username", value: username, inline: true },
-            { name: "Action", value: selected, inline: true },
-            { name: "Reason", value: err.message || "Unknown error occurred during API call." }
-          )
-          .setFooter({text: `Action failed for ${interaction.user.tag}`}) 
-          .setTimestamp();
 
-        // Report the failure to the user
-        await interaction.followUp({ embeds: [failEmbed], flags: 64 });
+        // --- 3B. HANDLE RANKING/EXILE/ACCEPT ACTIONS ---
+        
+        let logMessage = ""; 
+        let actionTitle = "Action Successful";
+        let actionColor = 0x4CAF50; // Success Green
+        let selectedAction = actionType; // For error logging
 
-        // Log the failure
-        const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
-        if (logChannel) logChannel.send({ embeds: [failEmbed] });
-      }
+        try {
+            const userId = await noblox.getIdFromUsername(username);
+
+            // Fetch rank ID/Name BEFORE action for logging the rank change
+            const previousRankId = await noblox.getRankInGroup(groupId, userId);
+            const previousRankName = getRankNameFromId(previousRankId, config.DIVISIONS);
+            
+            // --- PERFORM ROBLOX ACTION ---
+            
+            if (actionType === "rank") {
+                const division = customIdParts[2];
+                const rankId = config.DIVISIONS[division].rankId;
+                await noblox.setRank(groupId, userId, rankId);
+                actionTitle = "Rank Change Successful";
+                const newRankName = division; 
+                selectedAction = division;
+
+                logMessage = `✅ **${username}** ranked from **${previousRankName}** to **${newRankName}**.`;
+            }
+
+            else if (actionType === "remove") {
+                await noblox.exile(groupId, userId);
+                actionTitle = "Exiled Successfully";
+                actionColor = 0xFF0000; 
+                selectedAction = "Exile";
+                logMessage = `🗑️ **${username}** has been **Exiled** (Previous Rank: ${previousRankName}) from the group.`;
+            }
+
+            else if (actionType === "accept") {
+                await noblox.handleJoinRequest(groupId, userId, true);
+                actionTitle = "Request Accepted Successfully";
+                selectedAction = "Accept Request";
+                logMessage = `📥 **${username}**'s join request has been **Accepted** (Set to Rank 1 / Member).`;
+            }
+
+            if (!logMessage) {
+                logMessage = `Performed action: **${selectedAction}** on **${username}**.`;
+            }
+            
+            // --- DISCORD RESPONSE LOGIC ---
+
+            const successEmbed = new EmbedBuilder()
+              .setColor(actionColor) 
+              .setTitle(actionTitle)
+              .setDescription(logMessage)
+              .setFooter({text: `Action performed by ${interaction.user.tag}`}) 
+              .setTimestamp();
+
+            await interaction.followUp({
+              embeds: [successEmbed],
+              components: [],
+              flags: 64, // EPHEMERAL
+            });
+
+            const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
+            if (logChannel) logChannel.send({ embeds: [successEmbed] });
+
+            // Edit the original message to remove components
+            await interaction.message.edit({ components: [] });
+
+        } catch (err) {
+            // --- ERROR HANDLING LOGIC ---
+            
+            if (logMessage) {
+                console.error(`[DISCORD API ERROR] Failed to send success followUp/edit message for successful action: ${logMessage}. Discord Error: ${err.message}`);
+                return;
+            }
+
+            const failEmbed = new EmbedBuilder()
+              .setColor(0xFF0000) 
+              .setTitle("❌ Action Failed")
+              .addFields(
+                { name: "Username", value: username, inline: true },
+                { name: "Action", value: selectedAction, inline: true },
+                { name: "Reason", value: err.message || "Unknown error occurred during API call." }
+              )
+              .setFooter({text: `Action failed for ${interaction.user.tag}`}) 
+              .setTimestamp();
+
+            await interaction.followUp({ embeds: [failEmbed], flags: 64 });
+
+            const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
+            if (logChannel) logChannel.send({ embeds: [failEmbed] });
+        }
     }
   });
 };
