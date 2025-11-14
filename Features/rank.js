@@ -1,4 +1,3 @@
-// Features/rank.js
 const noblox = require("noblox.js");
 const {
   SlashCommandBuilder,
@@ -33,7 +32,10 @@ module.exports.registerRankCommand = async (client, config) => {
         .setRequired(true)
     );
 
-  await client.application.commands.create(rankCommand);
+  // This line might throw an error if client.application is not ready, adding a safety check.
+  if (client.application && client.application.commands) {
+    await client.application.commands.create(rankCommand);
+  }
 
   client.on("interactionCreate", async (interaction) => {
     const groupId = config.ROBLOX.GROUP_ID;
@@ -56,24 +58,54 @@ module.exports.registerRankCommand = async (client, config) => {
         const currentRank = await noblox.getRankInGroup(groupId, userId);
         const isMember = currentRank > 0;
 
-        // --------------------- FIXED PENDING REQUEST LOGIC ---------------------
-        const requestsRaw = await noblox.getJoinRequests(groupId);
-        const requests = Array.isArray(requestsRaw)
-          ? requestsRaw
-          : requestsRaw?.data || [];
+        // --------------------- FIXED PENDING REQUEST LOGIC (PAGINATION) ---------------------
+        let isPending = false;
+        if (!isMember) {
+          let cursor = null;
+          
+          // Keep fetching until no cursor is returned (last page) or request is found
+          while (!isPending) {
+            let requestsData;
+            try {
+                // Fetch join requests, using the cursor if available
+                requestsData = await noblox.getJoinRequests(groupId, { cursor: cursor });
+            } catch (apiError) {
+                // Log API error if fetching pages fails (e.g., rate limit)
+                console.error(`[ROBLOX API] Error fetching join requests for group ${groupId}:`, apiError.message);
+                break; 
+            }
 
-        const isPending = requests.some((r) => {
-          // Check both possible formats
-          const id = r.UserId ?? r.userId ?? r.user?.userId ?? 0;
-          return Number(id) === Number(userId);
-        });
+            // Get the array of requests, handling both raw array and paginated object formats
+            const requests = Array.isArray(requestsData)
+              ? requestsData
+              : requestsData?.data || [];
+            
+            // If the current page is empty, break
+            if (requests.length === 0) break;
+
+            // Check if the target user is in the current page of requests
+            isPending = requests.some((r) => {
+              const id = r.UserId ?? r.userId ?? r.user?.userId ?? 0;
+              return Number(id) === Number(userId);
+            });
+
+            // Move to the next page if the user was not found and a next page exists
+            cursor = requestsData.nextPageCursor;
+            if (isPending || !cursor) {
+              break; 
+            }
+          }
+        }
         // ---------------------------------------------------------------
 
         const embed = new EmbedBuilder()
           .setColor("Blue")
           .setTitle("Roblox User Info")
+          // Added thumbnail for visual context
+          .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=420&height=420&format=png`)
           .addFields(
             { name: "Username", value: username, inline: true },
+            { name: "Current Rank", value: isMember ? currentRank.toString() : "N/A", inline: true },
             { name: "In Group", value: isMember ? "✅ Yes" : "❌ No", inline: true },
             { name: "Pending Request", value: isPending ? "✅ Yes" : "❌ No", inline: true }
           );
@@ -85,25 +117,31 @@ module.exports.registerRankCommand = async (client, config) => {
           .setMinValues(1)
           .setMaxValues(1);
 
-        // Add divisions
+        // Add divisions (only rankable if member)
         for (const divName of Object.keys(config.DIVISIONS)) {
           const div = config.DIVISIONS[divName];
           selectMenu.addOptions({
             label: divName,
             value: `rank_${divName}`,
             emoji: div.emoji,
-            description: isMember ? `Set rank to ${divName}` : "User not in group",
+            description: isMember ? `Set rank to ${divName}` : "User not in group (Cannot Rank)",
+            // Set default: !isMember to visually distinguish non-rankable options
+            default: !isMember,
           });
         }
 
-        // Remove user
-        selectMenu.addOptions({
-          label: "Remove from Group",
-          value: "remove",
-          description: isMember || isPending ? "Remove this user" : "Not available",
-        });
+        // Add action for removing/denying
+        // Only show 'Exile Member' if they are currently a member.
+        if (isMember) {
+           selectMenu.addOptions({
+              label: "Exile Member",
+              value: "remove",
+              description: "Remove the user from the group (Exile)",
+            });
+        }
 
-        // Accept join request if pending
+
+        // Accept join request if pending AND NOT member
         if (isPending && !isMember) {
           selectMenu.addOptions({
             label: "Accept Join Request",
@@ -127,10 +165,13 @@ module.exports.registerRankCommand = async (client, config) => {
 
     // --------------------- DROPDOWN HANDLER ---------------------
     if (interaction.isStringSelectMenu()) {
-      await interaction.deferUpdate();
+      await interaction.deferUpdate(); // Defer update to get time for API calls
 
       const username = interaction.customId.replace("rankMenu_", "");
       const selected = interaction.values[0];
+
+      let logMessage = "";
+      let actionTitle = "Action Successful";
 
       try {
         const userId = await noblox.getIdFromUsername(username);
@@ -139,40 +180,64 @@ module.exports.registerRankCommand = async (client, config) => {
           const division = selected.replace("rank_", "");
           const rankId = config.DIVISIONS[division].rankId;
           await noblox.setRank(groupId, userId, rankId);
+          actionTitle = "Ranked Successfully";
+          logMessage = `Ranked **${username}** to **${division}** (${rankId}).`;
         }
 
+        // Handle 'remove' (Exile only)
         if (selected === "remove") {
+          // Fetch rank before exiling for accurate logging
+          const currentRank = await noblox.getRankInGroup(groupId, userId);
+          
+          // Exile member (set rank to 0)
           await noblox.setRank(groupId, userId, 0);
+          actionTitle = "Exiled Successfully";
+          logMessage = `Exiled **${username}** (Previous Rank: ${currentRank}) from the group.`;
         }
 
         if (selected === "accept") {
           await noblox.acceptJoinRequest(groupId, userId);
+          actionTitle = "Request Accepted Successfully";
+          logMessage = `Accepted join request for **${username}**. They should now be rank 1.`;
+        }
+        
+        // If logMessage is still empty, it means an action was missed or invalid, but we proceed assuming a valid action was taken.
+        if (!logMessage) {
+            logMessage = `Performed action: **${selected}** on **${username}**.`;
         }
 
         const successEmbed = new EmbedBuilder()
           .setColor("Green")
-          .setTitle("Action Successful")
-          .setDescription(`Performed **${selected}** on **${username}**`)
+          .setTitle(actionTitle)
+          .setDescription(logMessage)
           .setTimestamp();
 
-        await interaction.editReply({
+        // Use followUp instead of editReply since deferUpdate was used
+        await interaction.followUp({
           embeds: [successEmbed],
           components: [],
+          flags: 64, // EPHEMERAL
         });
 
         const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
         if (logChannel) logChannel.send({ embeds: [successEmbed] });
+
+        // Since we deferred the UPDATE, we need to edit the original message to remove the dropdown
+        await interaction.message.edit({ components: [] });
+
       } catch (err) {
         const failEmbed = new EmbedBuilder()
           .setColor("Red")
           .setTitle("Action Failed")
           .addFields(
-            { name: "Username", value: username },
+            { name: "Username", value: username, inline: true },
+            { name: "Action", value: selected, inline: true },
             { name: "Reason", value: err.message }
           )
           .setTimestamp();
 
-        await interaction.editReply({ embeds: [failEmbed], components: [] });
+        // Use followUp for error reporting
+        await interaction.followUp({ embeds: [failEmbed], flags: 64 });
 
         const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
         if (logChannel) logChannel.send({ embeds: [failEmbed] });
