@@ -21,7 +21,7 @@ async function robloxLogin() {
     console.log("[ROBLOX] Bot logged in successfully.");
     robloxLoggedIn = true;
   } catch (err) {
-    console.log("[ROBLOX] Login failed:", err);
+    console.error("[ROBLOX] Login failed:", err);
   }
 }
 
@@ -43,6 +43,8 @@ module.exports.registerRankCommand = async (client, config) => {
       !interaction.isModalSubmit()
     )
       return;
+
+    const groupId = config.ROBLOX.GROUP_ID;
 
     // ---------- Slash Command ----------
     if (interaction.isChatInputCommand() && interaction.commandName === "rank") {
@@ -67,15 +69,14 @@ module.exports.registerRankCommand = async (client, config) => {
           .setStyle(ButtonStyle.Primary)
       );
 
-      await interaction.reply({ embeds: [embed], components: [row], flags: 64 });
+      return interaction.reply({ embeds: [embed], components: [row], flags: 64 });
     }
 
     // ---------- Button Click ----------
     if (interaction.isButton()) {
+      // Show modal for username
       if (interaction.customId === "enterUser") {
         try {
-          await interaction.deferReply({ ephemeral: true, flags: 64 });
-
           const modal = new ModalBuilder()
             .setCustomId("usernameModal")
             .setTitle("Enter Roblox Username");
@@ -88,39 +89,31 @@ module.exports.registerRankCommand = async (client, config) => {
             .setRequired(true);
 
           modal.addComponents(new ActionRowBuilder().addComponents(input));
-
-          await interaction.showModal(modal);
+          return await interaction.showModal(modal);
         } catch (err) {
           console.error("Failed to show modal:", err);
-          await interaction.followUp({
-            content: "❌ Failed to open modal.",
-            flags: 64,
-          });
+          if (!interaction.replied) {
+            return await interaction.reply({ content: "❌ Failed to open modal.", flags: 64 });
+          }
         }
       }
 
-      // Rank buttons or remove
+      // Handle rank assignment or remove
       if (
         interaction.customId.startsWith("rank_") ||
-        interaction.customId.startsWith("removeUser")
+        interaction.customId.startsWith("removeUser_")
       ) {
-        const parts = interaction.customId.split("_");
-        const action = parts[0]; // rank or removeUser
-        const divisionOrUsername = parts[1];
-        const username = parts[2] || divisionOrUsername;
+        const [action, username] = interaction.customId.split("_");
 
         try {
           const userId = await noblox.getIdFromUsername(username);
-          const groupId = config.ROBLOX.GROUP_ID;
 
-          if (action === "rank") {
-            if (divisionOrUsername === "DHS") {
-              await noblox.setRank(groupId, userId, config.DIVISIONS.DHS.rankId);
-            } else if (divisionOrUsername === "CHP") {
-              await noblox.setRank(groupId, userId, config.DIVISIONS.CHP.rankId);
-            } else if (divisionOrUsername === "LASD") {
-              await noblox.setRank(groupId, userId, config.DIVISIONS.LASD.rankId);
-            }
+          if (action === "rank_DHS") {
+            await noblox.setRank(groupId, userId, config.DIVISIONS.DHS.rankId);
+          } else if (action === "rank_CHP") {
+            await noblox.setRank(groupId, userId, config.DIVISIONS.CHP.rankId);
+          } else if (action === "rank_LASD") {
+            await noblox.setRank(groupId, userId, config.DIVISIONS.LASD.rankId);
           } else if (action === "removeUser") {
             await noblox.setRank(groupId, userId, 0);
           }
@@ -128,7 +121,7 @@ module.exports.registerRankCommand = async (client, config) => {
           const successEmbed = new EmbedBuilder()
             .setColor("Green")
             .setTitle("Action Successful")
-            .setDescription(`Performed **${interaction.customId}** on **${username}**.`)
+            .setDescription(`Performed **${action}** on **${username}**.`)
             .setTimestamp();
 
           await interaction.update({ embeds: [successEmbed], components: [] });
@@ -156,7 +149,6 @@ module.exports.registerRankCommand = async (client, config) => {
     // ---------- Modal Submit ----------
     if (interaction.isModalSubmit() && interaction.customId === "usernameModal") {
       const username = interaction.fields.getTextInputValue("usernameInput");
-      const groupId = config.ROBLOX.GROUP_ID;
 
       try {
         const userId = await noblox.getIdFromUsername(username);
@@ -177,27 +169,34 @@ module.exports.registerRankCommand = async (client, config) => {
 
         const buttons = new ActionRowBuilder();
 
+        // DHS
         buttons.addComponents(
           new ButtonBuilder()
             .setCustomId(`rank_DHS_${username}`)
             .setLabel(`${config.DIVISIONS.DHS.emoji} DHS`)
             .setStyle(ButtonStyle.Primary)
-            .setDisabled(isMember)
+            .setDisabled(!isMember && !isPending)
         );
+
+        // CHP
         buttons.addComponents(
           new ButtonBuilder()
             .setCustomId(`rank_CHP_${username}`)
             .setLabel(`${config.DIVISIONS.CHP.emoji} CHP`)
             .setStyle(ButtonStyle.Primary)
-            .setDisabled(!isMember)
+            .setDisabled(!isMember && !isPending)
         );
+
+        // LASD
         buttons.addComponents(
           new ButtonBuilder()
             .setCustomId(`rank_LASD_${username}`)
             .setLabel(`${config.DIVISIONS.LASD.emoji} LASD`)
             .setStyle(ButtonStyle.Primary)
-            .setDisabled(!isMember)
+            .setDisabled(!isMember && !isPending)
         );
+
+        // Remove
         buttons.addComponents(
           new ButtonBuilder()
             .setCustomId(`removeUser_${username}`)
@@ -207,9 +206,9 @@ module.exports.registerRankCommand = async (client, config) => {
             .setDisabled(!isMember && !isPending)
         );
 
-        await interaction.reply({ embeds: [infoEmbed], components: [buttons], flags: 64 });
+        return await interaction.reply({ embeds: [infoEmbed], components: [buttons], flags: 64 });
       } catch (err) {
-        await interaction.reply({ content: `❌ Failed to fetch user: ${err.message}`, flags: 64 });
+        return await interaction.reply({ content: `❌ Failed to fetch user: ${err.message}`, flags: 64 });
       }
     }
   });
