@@ -21,7 +21,7 @@ async function robloxLogin() {
     console.log("[ROBLOX] Bot logged in successfully.");
     robloxLoggedIn = true;
   } catch (err) {
-    console.error("[ROBLOX] Login failed:", err);
+    console.log("[ROBLOX] Login failed:", err);
   }
 }
 
@@ -37,7 +37,12 @@ module.exports.registerRankCommand = async (client, config) => {
   client.application.commands.create(rankCommand);
 
   client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isChatInputCommand() && !interaction.isButton() && !interaction.isModalSubmit()) return;
+    if (
+      !interaction.isChatInputCommand() &&
+      !interaction.isButton() &&
+      !interaction.isModalSubmit()
+    )
+      return;
 
     // ---------- Slash Command ----------
     if (interaction.isChatInputCommand() && interaction.commandName === "rank") {
@@ -45,7 +50,7 @@ module.exports.registerRankCommand = async (client, config) => {
       if (!interaction.member.roles.cache.has(requiredRole)) {
         return interaction.reply({
           content: "❌ You do not have permission to use this command.",
-          ephemeral: true,
+          flags: 64,
         });
       }
 
@@ -62,45 +67,68 @@ module.exports.registerRankCommand = async (client, config) => {
           .setStyle(ButtonStyle.Primary)
       );
 
-      await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+      await interaction.reply({ embeds: [embed], components: [row], flags: 64 });
     }
 
-    // ---------- Button Clicks ----------
+    // ---------- Button Click ----------
     if (interaction.isButton()) {
       if (interaction.customId === "enterUser") {
-        const modal = new ModalBuilder()
-          .setCustomId("usernameModal")
-          .setTitle("Enter Roblox Username");
+        try {
+          await interaction.deferReply({ ephemeral: true, flags: 64 });
 
-        const input = new TextInputBuilder()
-          .setCustomId("usernameInput")
-          .setLabel("Roblox Username")
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder("Username")
-          .setRequired(true);
+          const modal = new ModalBuilder()
+            .setCustomId("usernameModal")
+            .setTitle("Enter Roblox Username");
 
-        modal.addComponents(new ActionRowBuilder().addComponents(input));
-        return interaction.showModal(modal);
+          const input = new TextInputBuilder()
+            .setCustomId("usernameInput")
+            .setLabel("Roblox Username")
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder("Username")
+            .setRequired(true);
+
+          modal.addComponents(new ActionRowBuilder().addComponents(input));
+
+          await interaction.showModal(modal);
+        } catch (err) {
+          console.error("Failed to show modal:", err);
+          await interaction.followUp({
+            content: "❌ Failed to open modal.",
+            flags: 64,
+          });
+        }
       }
 
-      if (interaction.customId.startsWith("rank_") || interaction.customId.startsWith("removeUser")) {
+      // Rank buttons or remove
+      if (
+        interaction.customId.startsWith("rank_") ||
+        interaction.customId.startsWith("removeUser")
+      ) {
         const parts = interaction.customId.split("_");
-        const action = parts[1]; // DHS, CHP, LASD, or 'User'
-        const username = parts.slice(2).join("_"); // In case username has underscores
-        const groupId = config.ROBLOX.GROUP_ID;
+        const action = parts[0]; // rank or removeUser
+        const divisionOrUsername = parts[1];
+        const username = parts[2] || divisionOrUsername;
 
         try {
           const userId = await noblox.getIdFromUsername(username);
+          const groupId = config.ROBLOX.GROUP_ID;
 
-          if (action === "DHS") await noblox.setRank(groupId, userId, config.DIVISIONS.DHS.rankId);
-          else if (action === "CHP") await noblox.setRank(groupId, userId, config.DIVISIONS.CHP.rankId);
-          else if (action === "LASD") await noblox.setRank(groupId, userId, config.DIVISIONS.LASD.rankId);
-          else if (action === "User") await noblox.setRank(groupId, userId, 0); // remove from group
+          if (action === "rank") {
+            if (divisionOrUsername === "DHS") {
+              await noblox.setRank(groupId, userId, config.DIVISIONS.DHS.rankId);
+            } else if (divisionOrUsername === "CHP") {
+              await noblox.setRank(groupId, userId, config.DIVISIONS.CHP.rankId);
+            } else if (divisionOrUsername === "LASD") {
+              await noblox.setRank(groupId, userId, config.DIVISIONS.LASD.rankId);
+            }
+          } else if (action === "removeUser") {
+            await noblox.setRank(groupId, userId, 0);
+          }
 
           const successEmbed = new EmbedBuilder()
             .setColor("Green")
             .setTitle("Action Successful")
-            .setDescription(`Performed **${action}** on **${username}**.`)
+            .setDescription(`Performed **${interaction.customId}** on **${username}**.`)
             .setTimestamp();
 
           await interaction.update({ embeds: [successEmbed], components: [] });
@@ -179,9 +207,9 @@ module.exports.registerRankCommand = async (client, config) => {
             .setDisabled(!isMember && !isPending)
         );
 
-        await interaction.reply({ embeds: [infoEmbed], components: [buttons], ephemeral: true });
+        await interaction.reply({ embeds: [infoEmbed], components: [buttons], flags: 64 });
       } catch (err) {
-        await interaction.reply({ content: `❌ Failed to fetch user: ${err.message}`, ephemeral: true });
+        await interaction.reply({ content: `❌ Failed to fetch user: ${err.message}`, flags: 64 });
       }
     }
   });
