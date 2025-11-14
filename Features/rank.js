@@ -13,10 +13,8 @@ const {
 
 let robloxLoggedIn = false;
 
-// --------------------- ROBLOX LOGIN ---------------------
 async function robloxLogin() {
   if (robloxLoggedIn) return;
-
   try {
     await noblox.setCookie(process.env.ROBLOX_COOKIE);
     console.log("[ROBLOX] Bot logged in successfully.");
@@ -26,7 +24,6 @@ async function robloxLogin() {
   }
 }
 
-// --------------------- REGISTER COMMAND ---------------------
 module.exports.registerRankCommand = async (client, config) => {
   await robloxLogin();
 
@@ -37,12 +34,17 @@ module.exports.registerRankCommand = async (client, config) => {
   client.application.commands.create(rankCommand);
 
   client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isChatInputCommand() && !interaction.isModalSubmit() && !interaction.isButton()) return;
+    if (
+      !interaction.isChatInputCommand() &&
+      !interaction.isButton() &&
+      !interaction.isModalSubmit()
+    ) return;
+
+    const groupId = config.ROBLOX.GROUP_ID;
 
     // --------------------- SLASH COMMAND ---------------------
     if (interaction.isChatInputCommand() && interaction.commandName === "rank") {
       const requiredRole = config.COMMANDS.RANK_PERMISSION_ROLE;
-
       if (!interaction.member.roles.cache.has(requiredRole)) {
         return interaction.reply({
           content: "❌ You do not have permission to use this command.",
@@ -50,7 +52,7 @@ module.exports.registerRankCommand = async (client, config) => {
         });
       }
 
-      // Directly show modal, skipping embed + button
+      // Directly show the modal
       const modal = new ModalBuilder()
         .setCustomId("usernameModal")
         .setTitle("Enter Roblox Username");
@@ -71,9 +73,7 @@ module.exports.registerRankCommand = async (client, config) => {
     // --------------------- MODAL SUBMIT ---------------------
     if (interaction.isModalSubmit() && interaction.customId === "usernameModal") {
       await interaction.deferReply({ flags: 64 });
-
       const username = interaction.fields.getTextInputValue("usernameInput");
-      const groupId = config.ROBLOX.GROUP_ID;
 
       try {
         const userId = await noblox.getIdFromUsername(username);
@@ -81,7 +81,9 @@ module.exports.registerRankCommand = async (client, config) => {
         const isMember = currentRank > 0;
 
         const requests = await noblox.getJoinRequests(groupId);
-        const isPending = Array.isArray(requests) && requests.some((r) => r.UserId === userId);
+        const isPending =
+          Array.isArray(requests) &&
+          requests.some((r) => Number(r.UserId) === Number(userId));
 
         const infoEmbed = new EmbedBuilder()
           .setColor("Blue")
@@ -94,17 +96,20 @@ module.exports.registerRankCommand = async (client, config) => {
 
         const buttons = new ActionRowBuilder();
 
-        for (const div of ["DHS", "CHP", "LASD"]) {
+        // Divisions buttons
+        for (const div of Object.keys(config.DIVISIONS)) {
           const d = config.DIVISIONS[div];
           buttons.addComponents(
             new ButtonBuilder()
               .setCustomId(`rank_${div}_${username}`)
-              .setLabel(`${d.emoji} ${div}`)
+              .setLabel(div)
+              .setEmoji(d.emoji) // must be {id, name} object for custom emoji
               .setStyle(ButtonStyle.Primary)
               .setDisabled(!isMember)
           );
         }
 
+        // Remove From Group button
         buttons.addComponents(
           new ButtonBuilder()
             .setCustomId(`removeUser_${username}`)
@@ -114,24 +119,34 @@ module.exports.registerRankCommand = async (client, config) => {
             .setDisabled(!isMember && !isPending)
         );
 
-        return interaction.editReply({ embeds: [infoEmbed], components: [buttons] });
+        // Accept Group Request button if pending
+        if (isPending && !isMember) {
+          buttons.addComponents(
+            new ButtonBuilder()
+              .setCustomId(`acceptRequest_${username}`)
+              .setLabel("Accept Request")
+              .setEmoji("✅")
+              .setStyle(ButtonStyle.Success)
+          );
+        }
+
+        return interaction.editReply({
+          embeds: [infoEmbed],
+          components: [buttons],
+        });
       } catch (err) {
-        return interaction.editReply({ content: `❌ Failed to fetch user: ${err.message}` });
+        return interaction.editReply({
+          content: `❌ Failed to fetch user: ${err.message}`,
+        });
       }
     }
 
-    // --------------------- BUTTON: RANK ACTIONS ---------------------
-    if (
-      interaction.isButton() &&
-      (interaction.customId.startsWith("rank_") || interaction.customId.startsWith("removeUser_"))
-    ) {
-      const groupId = config.ROBLOX.GROUP_ID;
-      const parts = interaction.customId.split("_");
-      const action = parts[0];
-      const division = parts[1];
-      const username = parts.slice(2).join("_");
-
+    // --------------------- BUTTON HANDLER ---------------------
+    if (interaction.isButton()) {
       await interaction.deferReply({ flags: 64 });
+
+      const [action, division, ...rest] = interaction.customId.split("_");
+      const username = rest.join("_");
 
       try {
         const userId = await noblox.getIdFromUsername(username);
@@ -143,6 +158,10 @@ module.exports.registerRankCommand = async (client, config) => {
 
         if (action === "removeUser") {
           await noblox.setRank(groupId, userId, 0);
+        }
+
+        if (action === "acceptRequest") {
+          await noblox.acceptJoinRequest(groupId, userId);
         }
 
         const successEmbed = new EmbedBuilder()
@@ -165,7 +184,7 @@ module.exports.registerRankCommand = async (client, config) => {
           )
           .setTimestamp();
 
-        await interaction.editReply({ embeds: [failEmbed] });
+        await interaction.editReply({ embeds: [failEmbed], components: [] });
 
         const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
         if (logChannel) logChannel.send({ embeds: [failEmbed] });
