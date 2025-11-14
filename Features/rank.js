@@ -437,14 +437,14 @@ module.exports.registerRankCommand = async (client, config) => {
                 actionTitle = "Exiled Successfully";
                 actionColor = 0xFF0000; 
                 selectedAction = "Exile";
-                logMessage = `🗑️ **${username}** has been **Exiled** (Previous Rank: ${previousRankName}) from the group.`;
+                logMessage = `<:trashicon:1233617122731757568> **${username}** has been **Exiled** (Previous Rank: ${previousRankName}) from the group.`;
             }
 
             else if (selectedValue === "accept") {
                 await noblox.handleJoinRequest(groupId, userId, true);
                 actionTitle = "Request Accepted Successfully";
                 selectedAction = "Accept Request";
-                logMessage = `📥 **${username}**'s join request has been **Accepted** (Set to Rank 1 / Member).`;
+                logMessage = `<:Submission:1233803895994585219> **${username}**'s join request has been **Accepted** (Set to Rank 1 / Member).`;
             }
 
             if (!logMessage) {
