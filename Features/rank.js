@@ -8,6 +8,23 @@ const {
   ButtonStyle,
 } = require("discord.js");
 
+// --- CUSTOM EMOJI MAPPING ---
+const EMOJIS = {
+  // Category Dropdown Emojis
+  CATEGORY_RANKS: "<:RTO:1421570606863876166>",
+  CATEGORY_ACTIONS: "<:Hammer:1234026434973143071>",
+  
+  // Division Ranks (Must match keys in config.DIVISIONS for dynamic lookup)
+  DHS: "<:DHS:1438835075843358720>",
+  CHP: "<:CHP:1438834718492594176>",
+  LASD: "<:LASD:1438834657436373064>",
+
+  // Administrative Actions
+  ACCEPT: "<:Addition:1272335252647444500>",
+  EXILE: "<:trashicon:1233617122731757568>",
+  BACK: "<:back:1438906842901254324>",
+};
+
 let robloxLoggedIn = false;
 
 async function robloxLogin() {
@@ -21,17 +38,31 @@ async function robloxLogin() {
   }
 }
 
-// Helper function to map Rank ID to Rank Name from config
-const getRankNameFromId = (rankId, configDivisions) => {
+/**
+ * Resolves the rank name by prioritizing names defined in the config.
+ * Falls back to the official Roblox group rank name if not found in config.
+ * * NOTE: The function now correctly takes the userId to resolve the official rank name
+ * via the noblox API when a local division name is not found.
+ */
+const resolveRankName = async (rankId, userId, configDivisions, groupId) => {
   if (rankId === 0) return "Not in Group";
-  // Check against configured divisions
+
+  // 1. Check against configured divisions (prioritize local names for consistency)
   for (const [name, div] of Object.entries(configDivisions)) {
     if (div.rankId === rankId) {
       return name;
     }
   }
-  // Default Roblox rank name for rank 1 (assuming general 'Member' role)
-  return rankId === 1 ? "Member" : "Unknown Rank";
+
+  // 2. Fallback: Get the official rank name from Roblox API
+  // FIX: Using userId as the second parameter as per noblox documentation.
+  try {
+    const officialName = await noblox.getRankNameInGroup(groupId, userId);
+    return officialName;
+  } catch (e) {
+    console.error(`Failed to get official rank name for User ID ${userId} (Rank ID ${rankId}): ${e.message}`);
+    return "Unknown Rank (API Error)";
+  }
 };
 
 // Helper function to build the initial category components (used for /rank and 'Back' button)
@@ -47,20 +78,20 @@ const buildCategoryComponents = (username, isMember, isPending) => {
   // Option 1: Department Ranks (Rank Divisions - Requires membership)
   if (isMember) {
       categoryOptions.push({
-          label: "Department Ranks", // UPDATED LABEL
+          label: "Department Ranks",
           value: "category_ranks",
           description: "Promote or demote the user across department ranks.",
-          emoji: "🛡️"
+          emoji: EMOJIS.CATEGORY_RANKS // Custom Emoji
       });
   }
 
   // Option 2: Administrative Actions (Exile/Accept - shown conditionally)
   if (isMember || isPending) {
       categoryOptions.push({
-          label: "Administrative Actions", // UPDATED LABEL
+          label: "Administrative Actions",
           value: "category_actions",
           description: "Handle Exiling a member or accepting a Join Request.",
-          emoji: "⚙️"
+          emoji: EMOJIS.CATEGORY_ACTIONS // Custom Emoji
       });
   }
 
@@ -82,7 +113,8 @@ const getPanelContent = async (username, groupId, config, interactionUserTag = n
     const currentRankId = await noblox.getRankInGroup(groupId, userId);
     const isMember = currentRankId > 0;
     
-    let currentRankName = getRankNameFromId(currentRankId, config.DIVISIONS);
+    // UPDATE: Pass userId to resolveRankName
+    let currentRankName = await resolveRankName(currentRankId, userId, config.DIVISIONS, groupId);
 
     // --- PENDING REQUEST LOGIC (PAGINATION) ---
     let isPending = false;
@@ -113,6 +145,7 @@ const getPanelContent = async (username, groupId, config, interactionUserTag = n
     if (isPending) {
         rankStatusValue = `Pending Request`;
     } else if (isMember) {
+        // Use the official/resolved rank name here
         rankStatusValue = `${currentRankName}`;
     }
 
@@ -207,6 +240,11 @@ module.exports.registerRankCommand = async (client, config) => {
       const buttonRows = [];
       const maxButtonsPerRow = 5;
 
+      // Helper to dynamically get division emoji based on name
+      const getDivisionEmoji = (divName) => {
+          return EMOJIS[divName.toUpperCase()] || EMOJIS.CATEGORY_RANKS; 
+      };
+
       if (isRanksCategory && isMember) {
           // Generate Buttons for all divisions
           for (const divName of Object.keys(config.DIVISIONS)) {
@@ -219,6 +257,7 @@ module.exports.registerRankCommand = async (client, config) => {
                       .setLabel(divName)
                       .setStyle(ButtonStyle.Secondary)
                       .setDisabled(isCurrentAdministrativeRank)
+                      .setEmoji(getDivisionEmoji(divName)) // Custom Emoji
               );
           }
       } else if (isActionsCategory) {
@@ -239,7 +278,7 @@ module.exports.registerRankCommand = async (client, config) => {
                       .setCustomId(`action_accept_${username}`) // Format: action_accept_[username]
                       .setLabel('Accept Join Request')
                       .setStyle(ButtonStyle.Success)
-                      .setEmoji('📥')
+                      .setEmoji(EMOJIS.ACCEPT) // Custom Emoji
               );
           }
           
@@ -249,7 +288,7 @@ module.exports.registerRankCommand = async (client, config) => {
                       .setCustomId(`action_remove_${username}`) // Format: action_remove_[username]
                       .setLabel('Exile Member')
                       .setStyle(ButtonStyle.Danger)
-                      .setEmoji('🗑️')
+                      .setEmoji(EMOJIS.EXILE) // Custom Emoji
               );
           }
       }
@@ -263,8 +302,9 @@ module.exports.registerRankCommand = async (client, config) => {
       buttonRows.push(new ActionRowBuilder().addComponents(
           new ButtonBuilder()
               .setCustomId(`action_back_${username}`)
-              .setLabel('⬅️ Back to Categories')
+              .setLabel('Back to Categories') 
               .setStyle(ButtonStyle.Secondary)
+              .setEmoji(EMOJIS.BACK) // Custom Emoji
       ));
 
       const title = selectedCategory.replace('category_', '').replace('_', ' ');
@@ -322,7 +362,8 @@ module.exports.registerRankCommand = async (client, config) => {
 
             // Fetch rank ID/Name BEFORE action for logging the rank change
             const previousRankId = await noblox.getRankInGroup(groupId, userId);
-            const previousRankName = getRankNameFromId(previousRankId, config.DIVISIONS);
+            // UPDATE: Pass userId to resolveRankName for previous rank
+            const previousRankName = await resolveRankName(previousRankId, userId, config.DIVISIONS, groupId); 
             
             // --- PERFORM ROBLOX ACTION ---
             
