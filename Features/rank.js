@@ -88,12 +88,17 @@ module.exports.registerRankCommand = async (client, config) => {
             
             console.log(`[ROBLOX] Page ${pageCount} returned ${requests.length} requests.`);
             
-            // --- NEW DEBUG LOGGING: Print all IDs found on this page ---
-            const foundIds = requests.map(r => r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0).filter(id => id > 0);
-            if (foundIds.length > 0) {
-                 console.log(`[ROBLOX] Found potential request IDs on page ${pageCount}: ${foundIds.join(', ')}`);
+            // --- CRITICAL DEBUG LOGGING: Print all Usernames and IDs found on this page ---
+            const foundUsers = requests.map(r => {
+                const id = r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
+                const uname = r.Username ?? r.username ?? r.user?.username ?? 'UnknownUser';
+                return id > 0 ? `${uname} (${id})` : null;
+            }).filter(u => u);
+
+            if (foundUsers.length > 0) {
+                 console.log(`[ROBLOX] Found pending requests on page ${pageCount}: [${foundUsers.join(', ')}]`);
             }
-            // -----------------------------------------------------------
+            // -----------------------------------------------------------------------------
 
             // If the current page is empty, or the group has no pending requests, break
             if (requests.length === 0) break;
@@ -107,7 +112,7 @@ module.exports.registerRankCommand = async (client, config) => {
 
             // If the user was found, break immediately
             if (isPending) {
-              console.log(`[ROBLOX] Found pending request for ${username} on page ${pageCount}.`);
+              console.log(`[ROBLOX] Found pending request for ${username} (${userId}) on page ${pageCount}.`);
               break;
             }
 
