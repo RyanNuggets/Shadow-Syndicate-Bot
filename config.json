@@ -10,6 +10,7 @@
   "CHANNELS": {
     "BUTTON": "1437716170664050759",
     "LOGS": "1437716208597205054",
+    "RANK_LOGS": "123456789012345678",
     "RESULTS": "1437716157334294548",
     "ARREST_LOGS": "1437715989243629611",
     "AOTM_VOTING": "1187426326836154388",
@@ -82,5 +83,11 @@
         "rankName": "Low Command Promotional Quota (4 hours)"
       }
     ]
+  },
+
+  "ROBLOX": {
+    "GROUP_ID": 123456,
+    "RANK_ROLE_ID": 255,
+    "RANK_PERMS": "987654321098765432"
   }
 }
