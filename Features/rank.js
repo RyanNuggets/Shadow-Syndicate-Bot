@@ -41,8 +41,7 @@ async function robloxLogin() {
 /**
  * Resolves the rank name by prioritizing names defined in the config.
  * Falls back to the official Roblox group rank name if not found in config.
- * * NOTE: The function now correctly takes the userId to resolve the official rank name
- * via the noblox API when a local division name is not found.
+ * This is primarily used for logging messages to ensure division names are tracked.
  */
 const resolveRankName = async (rankId, userId, configDivisions, groupId) => {
   if (rankId === 0) return "Not in Group";
@@ -55,7 +54,6 @@ const resolveRankName = async (rankId, userId, configDivisions, groupId) => {
   }
 
   // 2. Fallback: Get the official rank name from Roblox API
-  // FIX: Using userId as the second parameter as per noblox documentation.
   try {
     const officialName = await noblox.getRankNameInGroup(groupId, userId);
     return officialName;
@@ -113,9 +111,6 @@ const getPanelContent = async (username, groupId, config, interactionUserTag = n
     const currentRankId = await noblox.getRankInGroup(groupId, userId);
     const isMember = currentRankId > 0;
     
-    // UPDATE: Pass userId to resolveRankName
-    let currentRankName = await resolveRankName(currentRankId, userId, config.DIVISIONS, groupId);
-
     // --- PENDING REQUEST LOGIC (PAGINATION) ---
     let isPending = false;
     if (!isMember) {
@@ -145,8 +140,14 @@ const getPanelContent = async (username, groupId, config, interactionUserTag = n
     if (isPending) {
         rankStatusValue = `Pending Request`;
     } else if (isMember) {
-        // Use the official/resolved rank name here
-        rankStatusValue = `${currentRankName}`;
+        // --- MODIFIED: Directly fetch the actual rank name from the Roblox API as requested ---
+        try {
+            rankStatusValue = await noblox.getRankNameInGroup(groupId, userId);
+        } catch (e) {
+            console.error(`Failed to get official rank name for User ID ${userId} during panel status: ${e.message}`);
+            // Fallback to the Rank ID if API call fails
+            rankStatusValue = `Member (Rank ID: ${currentRankId})`;
+        }
     }
 
     const embed = new EmbedBuilder()
@@ -216,7 +217,7 @@ module.exports.registerRankCommand = async (client, config) => {
       }
     }
 
-    // --------------------- DROPDOWN HANDLER (Stage 2: Category Selection -> Button Generation) ---------------------
+    // --------------------- CATEGORY DROPDOWN HANDLER (Stage 2: Category Selection -> Action Dropdown Generation) ---------------------
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('categorySelect_')) {
       // FIX: Wrap deferUpdate in try/catch to prevent 'Unknown interaction' crash
       try {
@@ -236,9 +237,13 @@ module.exports.registerRankCommand = async (client, config) => {
       const currentRankId = await noblox.getRankInGroup(groupId, userId);
       const isMember = currentRankId > 0;
       
-      let actionButtons = [];
-      const buttonRows = [];
-      const maxButtonsPerRow = 5;
+      const actionSelectMenu = new StringSelectMenuBuilder()
+          .setCustomId(`actionSelect_${username}`) // NEW ID for Action Dropdown
+          .setMinValues(1)
+          .setMaxValues(1);
+
+      let actionOptions = [];
+      let placeholderText = "Select an action...";
 
       // Helper to dynamically get division emoji based on name
       const getDivisionEmoji = (divName) => {
@@ -246,27 +251,31 @@ module.exports.registerRankCommand = async (client, config) => {
       };
 
       if (isRanksCategory && isMember) {
-          // Generate Buttons for all divisions
+          placeholderText = "Select a Department Rank to set...";
+          
+          // Generate Options for all divisions
           for (const divName of Object.keys(config.DIVISIONS)) {
               const div = config.DIVISIONS[divName];
               
-              // FIX 3: Simplify disabling logic: disable if the user currently holds this rank.
+              // Only add ranks that are NOT the user's current rank
               const isDisabled = currentRankId === div.rankId;
               
-              actionButtons.push(
-                  new ButtonBuilder()
-                      .setCustomId(`action_rank_${divName}_${username}`) // Format: action_rank_[divName]_[username]
-                      .setLabel(divName)
-                      .setStyle(ButtonStyle.Secondary)
-                      .setDisabled(isDisabled) // <-- Use corrected logic
-                      .setEmoji(getDivisionEmoji(divName)) // Custom Emoji
-              );
+              if (!isDisabled) {
+                  actionOptions.push({
+                      label: `Set Rank: ${divName}`,
+                      value: `rank_${divName}`, // Value format: rank_[divName]
+                      description: `Change user's rank to ${divName} (Rank ID: ${div.rankId})`,
+                      emoji: getDivisionEmoji(divName)
+                  });
+              }
           }
       } else if (isActionsCategory) {
-          // --- Re-check PENDING status for the Accept Button ---
+          placeholderText = "Select an Administrative Action...";
+          
+          // --- Re-check PENDING status for the Accept Option ---
           let isPending = false; 
           if (!isMember) {
-              const requestsData = await noblox.getJoinRequests(groupId, { limit: 50 }); // Check first 50 for quick lookup
+              const requestsData = await noblox.getJoinRequests(groupId, { limit: 50 }); 
               const requests = Array.isArray(requestsData) ? requestsData : requestsData?.data || [];
               isPending = requests.some((r) => {
                    const id = r.requester?.userId ?? r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
@@ -275,108 +284,99 @@ module.exports.registerRankCommand = async (client, config) => {
           }
 
           if (!isMember && isPending) {
-              actionButtons.push(
-                  new ButtonBuilder()
-                      .setCustomId(`action_accept_${username}`) // Format: action_accept_[username]
-                      .setLabel('Accept Join Request')
-                      .setStyle(ButtonStyle.Success)
-                      .setEmoji(EMOJIS.ACCEPT) // Custom Emoji
-              );
+              actionOptions.push({
+                  label: 'Accept Join Request',
+                  value: 'accept',
+                  description: 'Accept the pending group join request.',
+                  emoji: EMOJIS.ACCEPT
+              });
           }
           
           if (isMember) {
-              actionButtons.push(
-                  new ButtonBuilder()
-                      .setCustomId(`action_remove_${username}`) // Format: action_remove_[username]
-                      .setLabel('Exile Member')
-                      .setStyle(ButtonStyle.Danger)
-                      .setEmoji(EMOJIS.EXILE) // Custom Emoji
-              );
+              actionOptions.push({
+                  label: 'Exile Member',
+                  value: 'remove',
+                  description: 'Permanently exile the user from the group.',
+                  emoji: EMOJIS.EXILE
+              });
           }
       }
       
-      // Organize buttons into rows of max 5
-      for (let i = 0; i < actionButtons.length; i += maxButtonsPerRow) {
-          buttonRows.push(new ActionRowBuilder().addComponents(actionButtons.slice(i, i + maxButtonsPerRow)));
-      }
+      // Add 'Back' option (MANDATORY in the dropdown as requested)
+      actionOptions.push({
+          label: 'Back to Categories',
+          value: 'back', // Value format: back
+          description: 'Return to the main selection menu.',
+          emoji: EMOJIS.BACK
+      });
 
-      // Add 'Back' button row (Essential for UX)
-      buttonRows.push(new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-              .setCustomId(`action_back_${username}`)
-              .setLabel('Back to Categories') 
-              .setStyle(ButtonStyle.Secondary)
-              .setEmoji(EMOJIS.BACK) // Custom Emoji
-      ));
+      actionSelectMenu.addOptions(actionOptions);
+      actionSelectMenu.setPlaceholder(placeholderText);
+      
+      const actionRows = [new ActionRowBuilder().addComponents(actionSelectMenu)];
 
-      // FIX 2: Get the current embeds from the message to retain the status panel
+      // Get the current embeds and edit the message
       const existingEmbeds = interaction.message.embeds; 
-
-      // Edit the original message to replace the dropdown with buttons
+      
       await interaction.message.edit({
-          // FIX 2: Set content to null to remove the temporary "Select an action..." message.
           content: null, 
-          // FIX 2: Keep the existing embed to display status
           embeds: existingEmbeds, 
-          components: buttonRows
+          components: actionRows
       });
       return;
     }
 
-    // --------------------- BUTTON HANDLER (Stage 3: Action Execution / Back) ---------------------
-    if (interaction.isButton()) {
+    // --------------------- ACTION DROPDOWN HANDLER (Stage 3: Action Execution / Back) ---------------------
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith('actionSelect_')) {
         // FIX: Wrap deferUpdate in try/catch to prevent 'Unknown interaction' crash
         try {
             await interaction.deferUpdate(); 
         } catch (e) {
-            console.error(`[DISCORD API ERROR] Failed to defer update for button: ${e.message}`);
+            console.error(`[DISCORD API ERROR] Failed to defer update for action dropdown: ${e.message}`);
             return;
         }
         
-        // Custom ID format: action_[type]_[username] or action_rank_[divName]_[username]
-        const customIdParts = interaction.customId.split('_');
+        const username = interaction.customId.replace("actionSelect_", "");
+        const selectedValue = interaction.values[0];
         
-        if (customIdParts[0] !== 'action') return; // Not a rank/exile button
+        let logMessage = ""; 
+        let actionTitle = "Action Successful";
+        let actionColor = 0x4CAF50; // Success Green
+        let selectedAction = selectedValue; // For error logging
 
-        const actionType = customIdParts[1]; // back, rank, accept, remove
-        const username = customIdParts.slice(-1)[0];
-        
-        // --- 3A. HANDLE BACK BUTTON ---
-        if (actionType === 'back') {
-            // Use the new reusable function to get content for the back view
+        // --- 3A. HANDLE BACK ACTION ---
+        if (selectedValue === 'back') {
+            // Revert to Category Dropdown
             const { embed, componentRows } = await getPanelContent(username, groupId, config);
             
-            // Edit message to revert to the Category Dropdown
             await interaction.message.edit({
-                content: null, // Clear the temp content
+                content: null,
                 embeds: [embed], 
                 components: componentRows
             });
             return;
         }
 
-
         // --- 3B. HANDLE RANKING/EXILE/ACCEPT ACTIONS ---
-        
-        let logMessage = ""; 
-        let actionTitle = "Action Successful";
-        let actionColor = 0x4CAF50; // Success Green
-        let selectedAction = actionType; // For error logging
-
         try {
             const userId = await noblox.getIdFromUsername(username);
 
             // Fetch rank ID/Name BEFORE action for logging the rank change
+            // resolveRankName is still used here as it provides the configured division name
             const previousRankId = await noblox.getRankInGroup(groupId, userId);
-            // UPDATE: Pass userId to resolveRankName for previous rank
             const previousRankName = await resolveRankName(previousRankId, userId, config.DIVISIONS, groupId); 
             
             // --- PERFORM ROBLOX ACTION ---
             
-            if (actionType === "rank") {
-                const division = customIdParts[2];
+            if (selectedValue.startsWith("rank_")) {
+                const division = selectedValue.split('_')[1];
                 const rankId = config.DIVISIONS[division].rankId;
+                
+                // Debug Log for issue identification
+                console.log(`[ROBLOX RANK] Attempting to rank user ${username} (ID: ${userId}) to ${division} with Rank ID: ${rankId}`);
+                
                 await noblox.setRank(groupId, userId, rankId);
+                
                 actionTitle = "Rank Change Successful";
                 const newRankName = division; 
                 selectedAction = division;
@@ -384,7 +384,7 @@ module.exports.registerRankCommand = async (client, config) => {
                 logMessage = `✅ **${username}** ranked from **${previousRankName}** to **${newRankName}**.`;
             }
 
-            else if (actionType === "remove") {
+            else if (selectedValue === "remove") {
                 await noblox.exile(groupId, userId);
                 actionTitle = "Exiled Successfully";
                 actionColor = 0xFF0000; 
@@ -392,7 +392,7 @@ module.exports.registerRankCommand = async (client, config) => {
                 logMessage = `🗑️ **${username}** has been **Exiled** (Previous Rank: ${previousRankName}) from the group.`;
             }
 
-            else if (actionType === "accept") {
+            else if (selectedValue === "accept") {
                 await noblox.handleJoinRequest(groupId, userId, true);
                 actionTitle = "Request Accepted Successfully";
                 selectedAction = "Accept Request";
@@ -421,7 +421,7 @@ module.exports.registerRankCommand = async (client, config) => {
             const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
             if (logChannel) logChannel.send({ embeds: [successEmbed] });
 
-            // --- REFRESH AND RETURN TO CATEGORY VIEW (User Request) ---
+            // --- REFRESH AND RETURN TO CATEGORY VIEW ---
             // Fetch the updated status and components
             const { embed: refreshedEmbed, componentRows: refreshedComponents } = await getPanelContent(username, groupId, config);
 
