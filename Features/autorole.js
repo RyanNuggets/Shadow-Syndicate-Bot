@@ -4,7 +4,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 async function registerAutoRoleCommand(client, config) {
 console.log(`Successfully registered /autorole command in guild: ${config.GUILD_ID}`);
 
-client.once('ready', async () => {
+client.once('clientReady', async () => {
 try {
 const guild = await client.guilds.fetch(config.GUILD_ID);
 
