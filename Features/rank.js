@@ -88,13 +88,20 @@ module.exports.registerRankCommand = async (client, config) => {
             
             console.log(`[ROBLOX] Page ${pageCount} returned ${requests.length} requests.`);
             
+            // --- NEW DEBUG LOGGING: Print all IDs found on this page ---
+            const foundIds = requests.map(r => r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0).filter(id => id > 0);
+            if (foundIds.length > 0) {
+                 console.log(`[ROBLOX] Found potential request IDs on page ${pageCount}: ${foundIds.join(', ')}`);
+            }
+            // -----------------------------------------------------------
+
             // If the current page is empty, or the group has no pending requests, break
             if (requests.length === 0) break;
 
             // Check if the target user is in the current page of requests
             isPending = requests.some((r) => {
-              // Check three common places for the user ID in request objects
-              const id = r.UserId ?? r.userId ?? r.user?.userId ?? 0;
+              // Check four common places for the user ID in request objects, including r.id
+              const id = r.UserId ?? r.userId ?? r.user?.userId ?? r.id ?? 0;
               return Number(id) === Number(userId);
             });
 
