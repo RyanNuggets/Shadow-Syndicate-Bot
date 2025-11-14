@@ -38,7 +38,7 @@ const autoroleModule = require('./Features/autorole');
 const blsExamModule = require('./Features/blsexam'); // Require the BLS Exam module
 const rankModule = require('./Features/rank'); // <-- Added rank module
 
-client.once('ready', async () => {
+client.once('clientReady', async () => {
     console.log(`Bot logged in as ${client.user.tag}!`);
 
     // --- Register Slash Commands (These must be awaited after client is ready) ---
