@@ -249,14 +249,16 @@ module.exports.registerRankCommand = async (client, config) => {
           // Generate Buttons for all divisions
           for (const divName of Object.keys(config.DIVISIONS)) {
               const div = config.DIVISIONS[divName];
-              const isCurrentAdministrativeRank = currentRankId === div.rankId && [3, 6, 9].includes(currentRankId);
+              
+              // FIX 3: Simplify disabling logic: disable if the user currently holds this rank.
+              const isDisabled = currentRankId === div.rankId;
               
               actionButtons.push(
                   new ButtonBuilder()
                       .setCustomId(`action_rank_${divName}_${username}`) // Format: action_rank_[divName]_[username]
                       .setLabel(divName)
                       .setStyle(ButtonStyle.Secondary)
-                      .setDisabled(isCurrentAdministrativeRank)
+                      .setDisabled(isDisabled) // <-- Use corrected logic
                       .setEmoji(getDivisionEmoji(divName)) // Custom Emoji
               );
           }
@@ -307,11 +309,15 @@ module.exports.registerRankCommand = async (client, config) => {
               .setEmoji(EMOJIS.BACK) // Custom Emoji
       ));
 
-      const title = selectedCategory.replace('category_', '').replace('_', ' ');
+      // FIX 2: Get the current embeds from the message to retain the status panel
+      const existingEmbeds = interaction.message.embeds; 
 
       // Edit the original message to replace the dropdown with buttons
       await interaction.message.edit({
-          content: `Select an action for **${username}** in the \`${title.toUpperCase()}\` section.`,
+          // FIX 2: Set content to null to remove the temporary "Select an action..." message.
+          content: null, 
+          // FIX 2: Keep the existing embed to display status
+          embeds: existingEmbeds, 
           components: buttonRows
       });
       return;
@@ -432,7 +438,7 @@ module.exports.registerRankCommand = async (client, config) => {
             
             if (logMessage) {
                 console.error(`[DISCORD API ERROR] Failed to send success followUp/edit message for successful action: ${logMessage}. Discord Error: ${err.message}`);
-                return;
+                // Continue to refresh the panel even if followUp failed.
             }
 
             const failEmbed = new EmbedBuilder()
@@ -446,7 +452,13 @@ module.exports.registerRankCommand = async (client, config) => {
               .setFooter({text: `Action failed for ${interaction.user.tag}`}) 
               .setTimestamp();
 
-            await interaction.followUp({ embeds: [failEmbed], flags: 64 }); // This is also ephemeral
+            // Attempt to send an ephemeral failure message
+            try {
+                await interaction.followUp({ embeds: [failEmbed], flags: 64 });
+            } catch (followUpErr) {
+                console.error(`[DISCORD API ERROR] Failed to send followUp error message: ${followUpErr.message}`);
+            }
+
 
             const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
             if (logChannel) logChannel.send({ embeds: [failEmbed] });
