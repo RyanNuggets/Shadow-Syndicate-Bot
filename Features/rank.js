@@ -105,7 +105,9 @@ module.exports.registerRankCommand = async (client, config) => {
       }
 
       const username = interaction.options.getString("user");
-      await interaction.deferReply({ flags: 64 });
+      // FIX: Removed flags: 64 to make the reply public and prevent the "Unknown Message" error
+      // when moderators take too long to interact with the follow-up menus/buttons.
+      await interaction.deferReply(); 
 
       try {
         const userId = await noblox.getIdFromUsername(username);
@@ -151,11 +153,13 @@ module.exports.registerRankCommand = async (client, config) => {
 
         const embed = new EmbedBuilder()
           .setColor(null) // No color for main embed
-          .setTitle(username) // Simplified title: just the username
+          .setTitle("Roblox Group Panel") // UPDATED: Fixed Title
           .setFooter({text: `Requested by ${interaction.user.tag}`}) 
           .setTimestamp() 
           .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=420&height=420&format=png`)
           .addFields(
+            // UPDATED: Added User field
+            { name: "User:", value: username, inline: false },
             // Simplified fields: just the rank status (which now includes membership status)
             { name: "Current Rank:", value: rankStatusValue, inline: false }
           );
