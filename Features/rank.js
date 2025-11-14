@@ -3,8 +3,7 @@ const noblox = require("noblox.js");
 const {
   SlashCommandBuilder,
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
+  StringSelectMenuBuilder,
   EmbedBuilder,
 } = require("discord.js");
 
@@ -45,35 +44,27 @@ module.exports.registerRankCommand = async (client, config) => {
       if (!interaction.member.roles.cache.has(requiredRole)) {
         return interaction.reply({
           content: "❌ You do not have permission to use this command.",
-          ephemeral: true,
+          flags: 64,
         });
       }
 
       const username = interaction.options.getString("user");
-
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: 64 });
 
       try {
         const userId = await noblox.getIdFromUsername(username);
         const currentRank = await noblox.getRankInGroup(groupId, userId);
         const isMember = currentRank > 0;
 
-        // Get join requests safely
-        let requests = [];
-        try {
-          const rawRequests = await noblox.getJoinRequests(groupId);
-          if (Array.isArray(rawRequests)) {
-            requests = rawRequests;
-          } else if (rawRequests.data) {
-            requests = rawRequests.data;
-          }
-        } catch {
-          requests = [];
-        }
+        const requestsRaw = await noblox.getJoinRequests(groupId);
+        const requests = Array.isArray(requestsRaw)
+          ? requestsRaw
+          : requestsRaw.data || [];
+        const isPending = requests.some(
+          (r) => Number(r.UserId) === Number(userId)
+        );
 
-        const isPending = requests.some((r) => Number(r.UserId) === Number(userId));
-
-        const infoEmbed = new EmbedBuilder()
+        const embed = new EmbedBuilder()
           .setColor("Blue")
           .setTitle("Roblox User Info")
           .addFields(
@@ -82,45 +73,45 @@ module.exports.registerRankCommand = async (client, config) => {
             { name: "Pending Request", value: isPending ? "✅ Yes" : "❌ No", inline: true }
           );
 
-        const buttons = new ActionRowBuilder();
+        // --------------------- DROPDOWN ---------------------
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId(`rankMenu_${username}`)
+          .setPlaceholder("Select an action")
+          .setMinValues(1)
+          .setMaxValues(1);
 
-        // Division buttons
-        for (const div of Object.keys(config.DIVISIONS)) {
-          const d = config.DIVISIONS[div];
-          buttons.addComponents(
-            new ButtonBuilder()
-              .setCustomId(`rank_${div}_${username}`)
-              .setLabel(div)
-              .setEmoji(d.emoji)
-              .setStyle(ButtonStyle.Primary)
-              .setDisabled(!isMember)
-          );
+        // Add divisions
+        for (const divName of Object.keys(config.DIVISIONS)) {
+          const div = config.DIVISIONS[divName];
+          selectMenu.addOptions({
+            label: divName,
+            value: `rank_${divName}`,
+            emoji: div.emoji,
+            description: isMember ? `Set rank to ${divName}` : "User not in group",
+          });
         }
 
-        // Remove From Group button
-        buttons.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`removeUser_${username}`)
-            .setLabel("Remove From Group")
-            .setEmoji(config.EMOJIS.REMOVE)
-            .setStyle(ButtonStyle.Danger)
-            .setDisabled(!isMember && !isPending)
-        );
+        // Remove user
+        selectMenu.addOptions({
+          label: "Remove from Group",
+          value: "remove",
+          description: isMember || isPending ? "Remove this user" : "Not available",
+        });
 
-        // Accept Group Request button if pending
+        // Accept join request if pending
         if (isPending && !isMember) {
-          buttons.addComponents(
-            new ButtonBuilder()
-              .setCustomId(`acceptRequest_${username}`)
-              .setLabel("Accept Request")
-              .setEmoji("✅")
-              .setStyle(ButtonStyle.Success)
-          );
+          selectMenu.addOptions({
+            label: "Accept Join Request",
+            value: "accept",
+            description: "Accept the pending request",
+          });
         }
+
+        const row = new ActionRowBuilder().addComponents(selectMenu);
 
         return interaction.editReply({
-          embeds: [infoEmbed],
-          components: [buttons],
+          embeds: [embed],
+          components: [row],
         });
       } catch (err) {
         return interaction.editReply({
@@ -129,35 +120,40 @@ module.exports.registerRankCommand = async (client, config) => {
       }
     }
 
-    // --------------------- BUTTON HANDLER ---------------------
-    if (interaction.isButton()) {
-      const [action, division, ...rest] = interaction.customId.split("_");
-      const username = rest.join("_");
+    // --------------------- DROPDOWN HANDLER ---------------------
+    if (interaction.isStringSelectMenu()) {
+      await interaction.deferUpdate();
+
+      const username = interaction.customId.replace("rankMenu_", "");
+      const selected = interaction.values[0];
 
       try {
         const userId = await noblox.getIdFromUsername(username);
 
-        if (action === "rank") {
+        if (selected.startsWith("rank_")) {
+          const division = selected.replace("rank_", "");
           const rankId = config.DIVISIONS[division].rankId;
           await noblox.setRank(groupId, userId, rankId);
         }
 
-        if (action === "removeUser") {
+        if (selected === "remove") {
           await noblox.setRank(groupId, userId, 0);
         }
 
-        if (action === "acceptRequest") {
+        if (selected === "accept") {
           await noblox.acceptJoinRequest(groupId, userId);
         }
 
         const successEmbed = new EmbedBuilder()
           .setColor("Green")
           .setTitle("Action Successful")
-          .setDescription(`Performed **${action}** on **${username}**.`)
+          .setDescription(`Performed **${selected}** on **${username}**`)
           .setTimestamp();
 
-        // Update the button message
-        await interaction.update({ embeds: [successEmbed], components: [] });
+        await interaction.editReply({
+          embeds: [successEmbed],
+          components: [],
+        });
 
         const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
         if (logChannel) logChannel.send({ embeds: [successEmbed] });
@@ -171,7 +167,7 @@ module.exports.registerRankCommand = async (client, config) => {
           )
           .setTimestamp();
 
-        await interaction.update({ embeds: [failEmbed], components: [] });
+        await interaction.editReply({ embeds: [failEmbed], components: [] });
 
         const logChannel = client.channels.cache.get(config.CHANNELS.RANK_LOGS);
         if (logChannel) logChannel.send({ embeds: [failEmbed] });
