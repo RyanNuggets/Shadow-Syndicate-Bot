@@ -35,7 +35,7 @@ function registerPromotionInfractionCommand(client, config) {
     }
 
     if (client.isReady()) registerCommand();
-    else client.once('ready', registerCommand);
+    else client.once('clientReady', registerCommand);
 
     client.on('interactionCreate', async (interaction) => {
         if (!interaction.isChatInputCommand()) return;
