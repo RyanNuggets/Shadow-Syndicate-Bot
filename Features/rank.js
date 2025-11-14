@@ -181,7 +181,13 @@ module.exports.registerRankCommand = async (client, config) => {
 
     // --------------------- DROPDOWN HANDLER (Stage 2: Category Selection -> Button Generation) ---------------------
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('categorySelect_')) {
-      await interaction.deferUpdate(); 
+      // FIX: Wrap deferUpdate in try/catch to prevent 'Unknown interaction' crash
+      try {
+          await interaction.deferUpdate(); 
+      } catch (e) {
+          console.error(`[DISCORD API ERROR] Failed to defer update for dropdown: ${e.message}`);
+          return;
+      }
 
       const username = interaction.customId.replace("categorySelect_", "");
       const selectedCategory = interaction.values[0];
@@ -269,7 +275,13 @@ module.exports.registerRankCommand = async (client, config) => {
 
     // --------------------- BUTTON HANDLER (Stage 3: Action Execution / Back) ---------------------
     if (interaction.isButton()) {
-        await interaction.deferUpdate(); 
+        // FIX: Wrap deferUpdate in try/catch to prevent 'Unknown interaction' crash
+        try {
+            await interaction.deferUpdate(); 
+        } catch (e) {
+            console.error(`[DISCORD API ERROR] Failed to defer update for button: ${e.message}`);
+            return;
+        }
         
         // Custom ID format: action_[type]_[username] or action_rank_[divName]_[username]
         const customIdParts = interaction.customId.split('_');
