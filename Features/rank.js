@@ -158,6 +158,7 @@ const getPanelContent = async (username, groupId, config, interactionUserTag = n
       .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=420&height=420&format=png`)
       .addFields(
         { name: "User:", value: username, inline: false },
+        { name: "\u200b", value: "\u200b", inline: false }, // Blank spacer field added here
         { name: "Current Rank:", value: rankStatusValue, inline: false }
       );
 
