@@ -125,8 +125,7 @@ module.exports.registerRankCommand = async (client, config) => {
             value: `rank_${divName}`,
             emoji: div.emoji,
             description: isMember ? `Set rank to ${divName}` : "User not in group (Cannot Rank)",
-            // Set default: !isMember to visually distinguish non-rankable options
-            default: !isMember,
+            // Removed: default: !isMember, as it causes DiscordAPIError[50035] when multiple options are defaulted.
           });
         }
 
