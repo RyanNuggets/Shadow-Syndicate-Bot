@@ -68,9 +68,6 @@ module.exports.registerRankCommand = async (client, config) => {
       // Handle "Enter User" button
       if (interaction.customId === "enterUser") {
         try {
-          // defer first to prevent 3s timeout
-          await interaction.deferReply({ ephemeral: true });
-
           const modal = new ModalBuilder()
             .setCustomId("usernameModal")
             .setTitle("Enter Roblox Username");
@@ -85,7 +82,7 @@ module.exports.registerRankCommand = async (client, config) => {
           const row = new ActionRowBuilder().addComponents(input);
           modal.addComponents(row);
 
-          await interaction.showModal(modal);
+          await interaction.showModal(modal); // DO NOT defer before this
         } catch (err) {
           console.error("Failed to show modal:", err);
           if (!interaction.replied) {
@@ -102,7 +99,7 @@ module.exports.registerRankCommand = async (client, config) => {
         const groupId = config.ROBLOX.GROUP_ID;
 
         try {
-          await interaction.deferReply({ ephemeral: true });
+          await interaction.deferReply({ ephemeral: true }); // defer here to prevent 3s timeout
 
           const userId = await noblox.getIdFromUsername(username);
 
@@ -147,7 +144,7 @@ module.exports.registerRankCommand = async (client, config) => {
 
     // ---------- Modal Submit ----------
     if (interaction.isModalSubmit() && interaction.customId === "usernameModal") {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ ephemeral: true }); // defer for API call
 
       const username = interaction.fields.getTextInputValue("usernameInput");
       const groupId = config.ROBLOX.GROUP_ID;
