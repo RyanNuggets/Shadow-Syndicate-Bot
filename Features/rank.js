@@ -19,12 +19,27 @@ async function robloxLogin() {
   }
 }
 
+// Helper function to map Rank ID to Rank Name from config
+const getRankNameFromId = (rankId, configDivisions) => {
+  if (rankId === 0) return "Not in Group";
+  // Check against configured divisions
+  for (const [name, div] of Object.entries(configDivisions)) {
+    if (div.rankId === rankId) {
+      return name;
+    }
+  }
+  // Default Roblox rank name for rank 1 (assuming general 'Member' role)
+  return rankId === 1 ? "Member" : "Unknown Rank";
+};
+
+
 module.exports.registerRankCommand = async (client, config) => {
   await robloxLogin();
 
   const rankCommand = new SlashCommandBuilder()
     .setName("rank")
-    .setDescription("Manage Roblox users in the group")
+    // Aesthetic Improvement: More descriptive command name
+    .setDescription("View a user's status and manage their rank, exile, or join request.")
     .addStringOption((option) =>
       option
         .setName("user")
@@ -55,16 +70,12 @@ module.exports.registerRankCommand = async (client, config) => {
 
       try {
         const userId = await noblox.getIdFromUsername(username);
-        // Renamed to clarify we are getting the ID here
         const currentRankId = await noblox.getRankInGroup(groupId, userId);
         const isMember = currentRankId > 0;
         
-        let currentRankName = "N/A";
-        if (isMember) {
-            // Get the actual role name for display
-            currentRankName = await noblox.getRankNameInGroup(groupId, userId);
-        }
-        
+        // Optimization: Get the actual role name using the helper function
+        let currentRankName = getRankNameFromId(currentRankId, config.DIVISIONS);
+
         // --------------------- PENDING REQUEST LOGIC (PAGINATION) ---------------------
         let isPending = false;
         if (!isMember) {
@@ -119,7 +130,7 @@ module.exports.registerRankCommand = async (client, config) => {
         }
 
         const embed = new EmbedBuilder()
-          // Aesthetic Change: Set color to null
+          // AESTHETIC FIX: Set color to null as requested for the main lookup embed
           .setColor(null) 
           // New Title Format
           .setTitle(`Username: ${username}`)
@@ -219,40 +230,44 @@ module.exports.registerRankCommand = async (client, config) => {
 
       let logMessage = ""; 
       let actionTitle = "Action Successful";
-      // Aesthetic Change: Use null color
-      let actionColor = null; 
+      // Aesthetic Change: Define action color, default to Green for positive actions
+      let actionColor = 0x4CAF50; // Success Green
 
       try {
         const userId = await noblox.getIdFromUsername(username);
 
+        // Fetch rank ID/Name BEFORE action for logging the rank change
+        const previousRankId = await noblox.getRankInGroup(groupId, userId);
+        const previousRankName = getRankNameFromId(previousRankId, config.DIVISIONS);
+        
         // --- 1. PERFORM ROBLOX ACTION (Success sets logMessage) ---
 
         if (selected.startsWith("rank_")) {
           const division = selected.replace("rank_", "");
           const rankId = config.DIVISIONS[division].rankId;
           await noblox.setRank(groupId, userId, rankId);
-          actionTitle = "Ranked Successfully";
-          // Aesthetic Change: Use Rank Name instead of ID
-          logMessage = `✅ **${username}** has been ranked to **${division}**.`;
+          actionTitle = "Rank Change Successful";
+          const newRankName = division; // New rank name is the division name
+          
+          // Aesthetic & Logging Improvement: Log the rank change
+          logMessage = `✅ **${username}** ranked from **${previousRankName}** to **${newRankName}**.`;
         }
 
         // Handle 'remove' (Exile only)
         if (selected === "remove") {
-          // Fetch rank name before exiling for accurate logging
-          const currentRankName = await noblox.getRankNameInGroup(groupId, userId);
           
           await noblox.exile(groupId, userId);
           actionTitle = "Exiled Successfully";
-          // Aesthetic Change: Use Rank Name instead of ID, and Red for destructive action
-          logMessage = `🗑️ **${username}** has been **Exiled** (Previous Rank: ${currentRankName}) from the group.`;
-          actionColor = 0xff0000; 
+          
+          // Aesthetic Change: Use Red for destructive action
+          actionColor = 0xFF0000; 
+          logMessage = `🗑️ **${username}** has been **Exiled** (Previous Rank: ${previousRankName}) from the group.`;
         }
 
         if (selected === "accept") {
           await noblox.handleJoinRequest(groupId, userId, true);
           actionTitle = "Request Accepted Successfully";
-          logMessage = `📥 **${username}**'s join request has been **Accepted** (Set to Rank 1).`;
-          actionColor = 0x00ff00;
+          logMessage = `📥 **${username}**'s join request has been **Accepted** (Set to Rank 1 / Member).`;
         }
         
         if (!logMessage) {
@@ -262,7 +277,7 @@ module.exports.registerRankCommand = async (client, config) => {
         // --- 2. DISCORD RESPONSE LOGIC ---
 
         const successEmbed = new EmbedBuilder()
-          // Aesthetic Change: Use dynamic color (or null if not defined by action)
+          // Aesthetic Change: Use dynamic color for the reply/log embed
           .setColor(actionColor) 
           .setTitle(actionTitle)
           .setDescription(logMessage)
@@ -292,8 +307,8 @@ module.exports.registerRankCommand = async (client, config) => {
         }
 
         const failEmbed = new EmbedBuilder()
-          // Aesthetic Change: Use Red for failure, but set color to null
-          .setColor(null) 
+          // Aesthetic Change: Use Red for true failure
+          .setColor(0xFF0000) 
           .setTitle("❌ Action Failed")
           .addFields(
             { name: "Username", value: username, inline: true },
