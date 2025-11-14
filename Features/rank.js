@@ -21,8 +21,9 @@ const EMOJIS = {
 
   // Administrative Actions
   ACCEPT: "<:Addition:1272335252647444500>",
-  EXILE: "<:trashicon:1233617122731757568>",
+  EXILE: "<:bullet:1410911432253378601>", // UPDATED: New bullet emoji for Exile
   BACK: "<:back:1438906842901254324>",
+  CANCEL: "<:trashicon:1233617122731757568>", // NEW/UPDATED: Trash icon for Cancel
 };
 
 let robloxLoggedIn = false;
@@ -98,7 +99,7 @@ const buildCategoryComponents = (username, isMember, isPending) => {
       label: 'Cancel Panel',
       value: 'cancel',
       description: 'Close the rank panel.',
-      emoji: '🚫'
+      emoji: EMOJIS.CANCEL // Using the updated EMOJI for cancel
   });
 
   let components = [];
@@ -343,7 +344,7 @@ module.exports.registerRankCommand = async (client, config) => {
                   label: 'Exile Member',
                   value: 'remove',
                   description: 'Permanently exile the user from the group.',
-                  emoji: EMOJIS.EXILE
+                  emoji: EMOJIS.EXILE // This now uses the new bullet emoji
               });
           }
       }
