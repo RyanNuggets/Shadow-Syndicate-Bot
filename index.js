@@ -35,13 +35,13 @@ const promotionInfractionModule = require('./Features/promotion-infraction');
 const logArrestModule = require('./Features/logarrest');
 const availableCallsignsModule = require('./Features/availablecallsigns'); 
 const autoroleModule = require('./Features/autorole'); 
-const blsExamModule = require('./Features/blsexam'); 
-const rankModule = require('./Features/rank'); // ← Added rank module
+const blsExamModule = require('./Features/blsexam'); // Require the BLS Exam module
+const rankModule = require('./Features/rank'); // <-- Added rank module
 
 client.once('ready', async () => {
     console.log(`Bot logged in as ${client.user.tag}!`);
 
-    // --- Register Slash Commands ---
+    // --- Register Slash Commands (These must be awaited after client is ready) ---
     try {
         await timestampModule.registerTimestampCommand(client, config);
         await promotionInfractionModule.registerPromotionInfractionCommand(client, config);
@@ -49,7 +49,7 @@ client.once('ready', async () => {
         await availableCallsignsModule.registerAvailableCallsignsCommand(client, config);
         await autoroleModule.registerAutoRoleCommand(client, config);
 
-        await rankModule.registerRankCommand(client, config); // ← Register /rank command
+        await rankModule.registerRankCommand(client, config); // <-- Register /rank command
 
         // NOTE: BLS Exam event handlers are registered below, outside this block.
 
