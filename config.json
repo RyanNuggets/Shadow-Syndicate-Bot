@@ -117,5 +117,15 @@
 
   "COMMANDS": {
     "RANK_PERMISSION_ROLE": "1437715613463089242"
+  },
+
+  "SHIFT_MANAGEMENT": {
+    "SHIFT_ROLE_REQUIRED": "1437715613463089242",
+    "SHIFT_LOG_CHANNEL": "1437716208597205054",
+    "SHIFT_TYPES": [
+      { "id": "DHS", "name": "Main DHS" },
+      { "id": "RIG", "name": "RIG" },
+      { "id": "HSI", "name": "HSI" }
+    ]
   }
 }
