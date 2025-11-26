@@ -3,7 +3,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
-// Load configuration
+// --- Load configuration ---
 const configPath = path.join(__dirname, 'config.json');
 let config;
 try {
@@ -13,13 +13,13 @@ try {
     process.exit(1);
 }
 
-// Check for required environment variable
+// --- Check for required environment variable ---
 if (!process.env.DISCORD_TOKEN) {
     console.error("FATAL ERROR: DISCORD_TOKEN environment variable is not set.");
     process.exit(1);
 }
 
-// Initialize Discord Client
+// --- Initialize Discord Client ---
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds,
@@ -41,31 +41,31 @@ const rankModule = require('./Features/rank');
 // --- Shift Management Module ---
 const shiftManageModule = require('./Features/ShiftManagement/shiftmanage');
 
-client.once('clientReady', async () => {
-    console.log(`Bot logged in as ${client.user.tag}!`);
+// --- Client Ready Event ---
+client.once('ready', async () => {
+    console.log(`✅ Bot logged in as ${client.user.tag}!`);
 
-    // --- Register Slash Commands (These must be awaited after client is ready) ---
+    // --- Register Slash Commands ---
     try {
-        await timestampModule.registerTimestampCommand(client, config);
-        await promotionInfractionModule.registerPromotionInfractionCommand(client, config);
-        await logArrestModule.registerLogArrestCommand(client, config);
-        await availableCallsignsModule.registerAvailableCallsignsCommand(client, config);
-        await autoroleModule.registerAutoRoleCommand(client, config);
-        await rankModule.registerRankCommand(client, config);
-        
-        // This call was failing because registerShiftManageCommand wasn't exported
-        await shiftManageModule.registerShiftManageCommand(client, config); 
-        
+        if (timestampModule.registerTimestampCommand) await timestampModule.registerTimestampCommand(client, config);
+        if (promotionInfractionModule.registerPromotionInfractionCommand) await promotionInfractionModule.registerPromotionInfractionCommand(client, config);
+        if (logArrestModule.registerLogArrestCommand) await logArrestModule.registerLogArrestCommand(client, config);
+        if (availableCallsignsModule.registerAvailableCallsignsCommand) await availableCallsignsModule.registerAvailableCallsignsCommand(client, config);
+        if (autoroleModule.registerAutoRoleCommand) await autoroleModule.registerAutoRoleCommand(client, config);
+        if (rankModule.registerRankCommand) await rankModule.registerRankCommand(client, config);
+        if (shiftManageModule.registerShiftManageCommand) await shiftManageModule.registerShiftManageCommand(client, config);
+
         console.log("✅ All feature modules initialized successfully.");
     } catch (err) {
         console.error("❌ Error registering commands/handlers:", err);
     }
 });
 
-// 🔑 Register event handlers *before* client.login
-// This ensures handlers are active immediately.
-blsExamModule.registerExamHandlers(client, config);
-// This call was previously fixed to exist, and we ensure it is still exported.
-shiftManageModule.registerShiftManageHandlers(client, config); 
+// --- Event Handlers ---
+if (blsExamModule.registerExamHandlers) blsExamModule.registerExamHandlers(client, config);
+if (shiftManageModule.registerShiftManageHandlers) shiftManageModule.registerShiftManageHandlers(client, config);
 
-client.login(process.env.DISCORD_TOKEN);
+// --- Login ---
+client.login(process.env.DISCORD_TOKEN).catch(err => {
+    console.error("❌ Failed to login client:", err);
+});
