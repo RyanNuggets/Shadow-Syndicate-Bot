@@ -38,6 +38,9 @@ const autoroleModule = require('./Features/autorole');
 const blsExamModule = require('./Features/blsexam'); // Require the BLS Exam module
 const rankModule = require('./Features/rank'); // <-- Added rank module
 
+// --- Shift Management Module ---
+const shiftManageModule = require('./Features/ShiftManagement/shiftmanage');
+
 client.once('clientReady', async () => {
     console.log(`Bot logged in as ${client.user.tag}!`);
 
@@ -49,9 +52,8 @@ client.once('clientReady', async () => {
         await availableCallsignsModule.registerAvailableCallsignsCommand(client, config);
         await autoroleModule.registerAutoRoleCommand(client, config);
 
-        await rankModule.registerRankCommand(client, config); // <-- Register /rank command
-
-        // NOTE: BLS Exam event handlers are registered below, outside this block.
+        await rankModule.registerRankCommand(client, config); // <-- /rank
+        await shiftManageModule.registerShiftManageCommand(client, config); // <-- /shift manage
 
         console.log("✅ All feature modules initialized successfully.");
     } catch (err) {
@@ -63,5 +65,6 @@ client.once('clientReady', async () => {
 // This ensures the client.once('ready', ...) listener inside blsexam.js is called
 // when the client connects, allowing the start button to post.
 blsExamModule.registerExamHandlers(client, config);
+shiftManageModule.registerShiftManageHandlers(client, config); // <-- shift button interactions
 
 client.login(process.env.DISCORD_TOKEN);
