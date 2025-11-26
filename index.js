@@ -41,7 +41,7 @@ const rankModule = require('./Features/rank');
 const shiftManageModule = require('./Features/ShiftManagement/shiftmanage');
 
 // --- Event: clientReady ---
-client.once('clientReady', async () => {
+client.once('ready', async () => {
     console.log(`✅ Bot logged in as ${client.user.tag}!`);
 
     // --- Register Slash Commands ---
@@ -53,7 +53,7 @@ client.once('clientReady', async () => {
         await autoroleModule.registerAutoRoleCommand(client, config);
         await rankModule.registerRankCommand(client, config);
         
-        // Register shift command properly with log
+        // Register shift command properly
         await shiftManageModule.registerShiftManageCommand(client, config); 
 
         console.log("✅ All feature modules initialized successfully.");
@@ -64,7 +64,15 @@ client.once('clientReady', async () => {
 
 // --- Event Handlers ---
 blsExamModule.registerExamHandlers(client, config);
-shiftManageModule.registerShiftManageHandlers(client, config); 
+
+// Shift management interaction handler
+client.on('interactionCreate', async (interaction) => {
+    try {
+        await shiftManageModule.handleInteraction(interaction, config);
+    } catch (err) {
+        console.error("❌ Error handling shift interaction:", err);
+    }
+});
 
 // Login
 client.login(process.env.DISCORD_TOKEN);
