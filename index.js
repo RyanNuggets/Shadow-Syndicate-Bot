@@ -1,3 +1,4 @@
+// index.js
 const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -41,7 +42,7 @@ const rankModule = require('./Features/rank');
 const shiftManageModule = require('./Features/ShiftManagement/shiftmanage');
 
 // --- Event: clientReady ---
-client.once('ready', async () => {
+client.once('clientReady', async () => {
     console.log(`✅ Bot logged in as ${client.user.tag}!`);
 
     // --- Register Slash Commands ---
@@ -53,7 +54,7 @@ client.once('ready', async () => {
         await autoroleModule.registerAutoRoleCommand(client, config);
         await rankModule.registerRankCommand(client, config);
         
-        // Register shift command properly
+        // Register shift command properly with log
         await shiftManageModule.registerShiftManageCommand(client, config); 
 
         console.log("✅ All feature modules initialized successfully.");
@@ -62,17 +63,32 @@ client.once('ready', async () => {
     }
 });
 
-// --- Event Handlers ---
-blsExamModule.registerExamHandlers(client, config);
-
-// Shift management interaction handler
+// --- Event: interactionCreate ---
 client.on('interactionCreate', async (interaction) => {
     try {
+        // Shift management interaction
         await shiftManageModule.handleInteraction(interaction, config);
     } catch (err) {
         console.error("❌ Error handling shift interaction:", err);
+        if (interaction.isButton() || interaction.isChatInputCommand()) {
+            try {
+                await interaction.reply({ content: "There was an error processing your shift action.", ephemeral: true });
+            } catch {}
+        }
     }
+
+    // Other modules that require interaction
+    try { blsExamModule.handleInteraction?.(interaction, config); } catch {}
+    try { timestampModule.handleInteraction?.(interaction, config); } catch {}
+    try { promotionInfractionModule.handleInteraction?.(interaction, config); } catch {}
+    try { logArrestModule.handleInteraction?.(interaction, config); } catch {}
+    try { availableCallsignsModule.handleInteraction?.(interaction, config); } catch {}
+    try { autoroleModule.handleInteraction?.(interaction, config); } catch {}
+    try { rankModule.handleInteraction?.(interaction, config); } catch {}
 });
+
+// --- Register other event handlers ---
+blsExamModule.registerExamHandlers(client, config); 
 
 // Login
 client.login(process.env.DISCORD_TOKEN);
