@@ -1,10 +1,12 @@
 {
   "GUILD_ID": "1437715430545428553",
   "DISCORD_CLIENT_ID": "1437717705628188773",
+
   "EXAM_SETTINGS": {
     "TOTAL_QUESTIONS": 20,
     "PASS_SCORE": 15
   },
+
   "CHANNELS": {
     "BUTTON": "1437716170664050759",
     "LOGS": "1437716208597205054",
@@ -14,6 +16,7 @@
     "AOTM_VOTING": "1187426326836154388",
     "AOTM_PUBLISH": "1280921499548516383"
   },
+
   "ROLES": {
     "NEEDED_TO_START": "1437715794703421530",
     "ADD_ON_PASS": [
@@ -24,32 +27,14 @@
       "1437715794703421530"
     ]
   },
+
   "COMMAND_ROLES": {
     "LOG_ARREST_ROLE": "1437715826634526821",
     "AVAILABLE_CALLSIGNS_ROLE": "1437715613463089242",
     "AUTOROLE_ROLE": "1437715613463089242",
     "AUTOROLE_LOG_CHANNEL": "1437716075843293294"
   },
-  "SHIFT_MANAGEMENT": {
-  "SHIFT_TYPES": [
-    {
-      "name": "Main DHS",
-      "duration": 60,
-      "requiredRole": "1437715826634526821"
-    },
-    {
-      "name": "RIG", 
-      "duration": 30,
-      "requiredRole": "1437715826634526821"
-    },
-    {
-      "name": "HSI",
-      "duration": 45, 
-      "requiredRole": "1437715826634526821"
-    }
-  ],
-  "LOG_CHANNEL": "1437716208597205054"
-},
+
   "QUOTA_SETTINGS": {
     "QUOTA_COMMAND_PERMISSION_ROLE": "1437715613463089242",
     "GRACE_PERIOD_MINUTES": 10,
@@ -99,18 +84,22 @@
       }
     ]
   },
+
   "ROBLOX": {
     "GROUP_ID": 16804055,
+
     "RANK_IDS": {
       "DHS": 4,
       "CHP": 3,
       "LASD": 2
     }
   },
+
   "EMOJIS": {
     "LOOKUP": "<:lookup:1438837345536180385>",
     "REMOVE": "<:trashicon:1233617122731757568>"
   },
+
   "DIVISIONS": {
     "DHS": {
       "emoji": "<:DHS:1438835075843358720>",
@@ -124,5 +113,9 @@
       "emoji": "<:LASD:1438834657436373064>",
       "rankId": 2
     }
+  },
+
+  "COMMANDS": {
+    "RANK_PERMISSION_ROLE": "1437715613463089242"
   }
 }
