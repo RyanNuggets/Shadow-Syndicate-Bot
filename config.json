@@ -1,12 +1,10 @@
 {
   "GUILD_ID": "1437715430545428553",
   "DISCORD_CLIENT_ID": "1437717705628188773",
-
   "EXAM_SETTINGS": {
     "TOTAL_QUESTIONS": 20,
     "PASS_SCORE": 15
   },
-
   "CHANNELS": {
     "BUTTON": "1437716170664050759",
     "LOGS": "1437716208597205054",
@@ -16,7 +14,6 @@
     "AOTM_VOTING": "1187426326836154388",
     "AOTM_PUBLISH": "1280921499548516383"
   },
-
   "ROLES": {
     "NEEDED_TO_START": "1437715794703421530",
     "ADD_ON_PASS": [
@@ -27,14 +24,12 @@
       "1437715794703421530"
     ]
   },
-
   "COMMAND_ROLES": {
     "LOG_ARREST_ROLE": "1437715826634526821",
     "AVAILABLE_CALLSIGNS_ROLE": "1437715613463089242",
     "AUTOROLE_ROLE": "1437715613463089242",
     "AUTOROLE_LOG_CHANNEL": "1437716075843293294"
   },
-
   "QUOTA_SETTINGS": {
     "QUOTA_COMMAND_PERMISSION_ROLE": "1437715613463089242",
     "GRACE_PERIOD_MINUTES": 10,
@@ -84,7 +79,6 @@
       }
     ]
   },
-
   "ROBLOX": {
     "GROUP_ID": 16804055,
     "RANK_IDS": {
@@ -93,12 +87,10 @@
       "LASD": 2
     }
   },
-
   "EMOJIS": {
     "LOOKUP": "<:lookup:1438837345536180385>",
     "REMOVE": "<:trashicon:1233617122731757568>"
   },
-
   "DIVISIONS": {
     "DHS": {
       "emoji": "<:DHS:1438835075843358720>",
@@ -113,26 +105,16 @@
       "rankId": 2
     }
   },
-
-  "COMMANDS": {
-    "RANK_PERMISSION_ROLE": "1437715613463089242"
-  },
-
-  "SHIFT_ROLE_REQUIRED": "1437715613463089242", 
-  "SHIFT_LOG_CHANNEL": "1443333646260895935",
-
-  "SHIFT_TYPES": [
-    {
-      "name": "Patrol Shift (HSA)",
-      "id": "hsa_patrol"
+  "SHIFT_TYPES": {
+    "DHS": {
+      "name": "DHS",
+      "roleId": "1437715826634526821",
+      "logChannel": "1443333646260895935"
     },
-    {
-      "name": "Administrative Work",
-      "id": "admin_work"
-    },
-    {
-      "name": "Training Session",
-      "id": "training"
+    "RIG": {
+      "name": "RIG",
+      "roleId": "1437715745185464401",
+      "logChannel": "1443333646260895935"
     }
-  ]
+  }
 }
