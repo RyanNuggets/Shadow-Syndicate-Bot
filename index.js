@@ -1,4 +1,4 @@
-// index.js (with config.json + debug for interactions)
+// index.js (with safe button handling)
 const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -50,8 +50,6 @@ client.once('ready', async () => {
         await availableCallsignsModule.registerAvailableCallsignsCommand(client, config);
         await autoroleModule.registerAutoRoleCommand(client, config);
         await rankModule.registerRankCommand(client, config);
-
-        // SHIFT COMMAND
         await shiftManageModule.registerShiftManageCommand(client, config);
 
         console.log("✅ All modules ready.");
@@ -64,34 +62,33 @@ client.once('ready', async () => {
 // ---------------- EVENT HANDLERS ---------------- //
 // Exam & shift handlers before login
 blsExamModule.registerExamHandlers(client, config);
-shiftManageModule.registerShiftManageHandlers(client, config);
+shiftManageModule.registerShiftManageHandlers(client, config); // only for slash commands, NOT buttons
 
 // Interaction handler for buttons
 client.on('interactionCreate', async (interaction) => {
-    console.log(`[DEBUG] Interaction received: type=${interaction.type}, user=${interaction.user?.tag}`);
-
     try {
-        if (interaction.isCommand()) {
-            // Commands are handled in modules
-            console.log(`[DEBUG] Command interaction: ${interaction.commandName}`);
-            return;
-        }
+        if (interaction.isCommand()) return; // commands handled inside modules
 
-        if (interaction.isButton()) {
-            console.log(`[DEBUG] Button interaction: ${interaction.customId}`);
+        if (interaction.isButton() && interaction.customId.startsWith("SHIFT_")) {
+            console.log(`[DEBUG] Button pressed: ${interaction.customId} by ${interaction.user.tag}`);
 
-            // Defer immediately to prevent "Unknown interaction" errors
-            await interaction.deferUpdate().catch(err => {
-                console.error("[WARN] deferUpdate failed:", err);
-            });
+            // Defer immediately to prevent Unknown interaction errors
+            if (!interaction.deferred && !interaction.replied) {
+                await interaction.deferUpdate().catch(err => {
+                    console.error("[WARN] deferUpdate failed:", err);
+                });
+            }
 
-            // Call shift module handler
+            // Pass to shift module
             await shiftManageModule.handleShiftButtons(interaction, config).catch(err => {
                 console.error("[ERROR] handleShiftButtons failed:", err);
+                if (!interaction.replied && !interaction.deferred) {
+                    interaction.followUp({ content: "⚠️ Something went wrong.", ephemeral: true }).catch(() => {});
+                }
             });
         }
     } catch (err) {
-        console.error("❌ Error handling interaction:", err);
+        console.error("[FATAL] interactionCreate handler failed:", err);
     }
 });
 // ------------------------------------------------ //
