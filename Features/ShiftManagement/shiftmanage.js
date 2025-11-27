@@ -117,6 +117,9 @@ async function handleShiftManage(interaction, config) {
 }
 
 async function handleShiftButtons(interaction, config) {
+    // **Immediately acknowledge the button to prevent "Unknown interaction"**
+    await interaction.deferUpdate();
+
     const user = interaction.user;
     const uid = user.id;
 
@@ -160,7 +163,7 @@ async function handleShiftButtons(interaction, config) {
             new ButtonBuilder().setCustomId("SHIFT_END").setLabel("End").setStyle(ButtonStyle.Danger)
         );
 
-        await interaction.update({ embeds: [embed], components: [row] });
+        await interaction.editReply({ embeds: [embed], components: [row] });
 
         // Log
         const channel = interaction.client.channels.cache.get(typeInfo.logChannel);
@@ -174,7 +177,7 @@ async function handleShiftButtons(interaction, config) {
     // PAUSE SHIFT
     if (interaction.customId === "SHIFT_PAUSE") {
         shift = shiftData[uid].activeShift;
-        if (!shift) return interaction.reply({ content: "❌ No active shift.", ephemeral: true });
+        if (!shift) return; // already acknowledged by deferUpdate
 
         shift.lastBreakStart = Date.now();
         saveData();
@@ -195,14 +198,14 @@ async function handleShiftButtons(interaction, config) {
             new ButtonBuilder().setCustomId("SHIFT_END").setLabel("End").setStyle(ButtonStyle.Danger)
         );
 
-        await interaction.update({ embeds: [embed], components: [row] });
+        await interaction.editReply({ embeds: [embed], components: [row] });
         return;
     }
 
     // END SHIFT FROM BREAK OR ACTIVE
     if (interaction.customId === "SHIFT_END") {
         shift = shiftData[uid].activeShift;
-        if (!shift) return interaction.reply({ content: "❌ No active shift.", ephemeral: true });
+        if (!shift) return; // already acknowledged by deferUpdate
 
         const now = Date.now();
 
@@ -242,7 +245,7 @@ async function handleShiftButtons(interaction, config) {
             new ButtonBuilder().setCustomId("END_DISABLED").setLabel("End").setStyle(ButtonStyle.Danger).setDisabled(true)
         );
 
-        await interaction.update({ embeds: [embed], components: [row] });
+        await interaction.editReply({ embeds: [embed], components: [row] });
 
         const typeInfo = config.SHIFT_TYPES[shift.type];
         const channel = interaction.client.channels.cache.get(typeInfo.logChannel);
