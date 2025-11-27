@@ -13,39 +13,37 @@ try {
     process.exit(1);
 }
 
-// Check for required environment variable
+// Check for Discord token
 if (!process.env.DISCORD_TOKEN) {
     console.error("FATAL ERROR: DISCORD_TOKEN environment variable is not set.");
     process.exit(1);
 }
 
-// Initialize Discord Client
+// Initialize Discord Client with required intents
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent
-    ] 
+    ]
 });
 
-// --- Feature Modules ---
+// Import modules
 const timestampModule = require('./Features/timestamp');
 const promotionInfractionModule = require('./Features/promotion-infraction');
 const logArrestModule = require('./Features/logarrest');
-const availableCallsignsModule = require('./Features/availablecallsigns'); 
-const autoroleModule = require('./Features/autorole'); 
-const blsExamModule = require('./Features/blsexam'); 
-const rankModule = require('./Features/rank'); 
-
-// --- Shift Management Module ---
+const availableCallsignsModule = require('./Features/availablecallsigns');
+const autoroleModule = require('./Features/autorole');
+const blsExamModule = require('./Features/blsexam');
+const rankModule = require('./Features/rank');
 const shiftManageModule = require('./Features/ShiftManagement/shiftmanage');
 
-// --- Event: ready ---
+// When bot is ready
 client.once('ready', async () => {
     console.log(`✅ Bot logged in as ${client.user.tag}!`);
 
-    // --- Register Slash Commands ---
+    // Register slash commands
     try {
         await timestampModule.registerTimestampCommand(client, config);
         await promotionInfractionModule.registerPromotionInfractionCommand(client, config);
@@ -53,17 +51,17 @@ client.once('ready', async () => {
         await availableCallsignsModule.registerAvailableCallsignsCommand(client, config);
         await autoroleModule.registerAutoRoleCommand(client, config);
         await rankModule.registerRankCommand(client, config);
-        await shiftManageModule.registerShiftManageCommand(client, config); 
-
-        console.log("✅ All feature modules initialized successfully.");
+        await shiftManageModule.registerShiftManageCommand(client, config);
+        console.log("✅ All commands registered successfully.");
     } catch (err) {
-        console.error("❌ Error registering commands/handlers:", err);
+        console.error("❌ Error registering commands:", err);
     }
 });
 
-// --- Interaction Handler ---
+// Interaction handling
 client.on('interactionCreate', async (interaction) => {
     try {
+        // Handle shift command
         await shiftManageModule.handleInteraction(interaction, config);
     } catch (err) {
         console.error("❌ Error handling shift interaction:", err);
@@ -74,17 +72,17 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // Other modules
-    try { blsExamModule.handleInteraction?.(interaction, config); } catch {}
-    try { timestampModule.handleInteraction?.(interaction, config); } catch {}
-    try { promotionInfractionModule.handleInteraction?.(interaction, config); } catch {}
-    try { logArrestModule.handleInteraction?.(interaction, config); } catch {}
-    try { availableCallsignsModule.handleInteraction?.(interaction, config); } catch {}
-    try { autoroleModule.handleInteraction?.(interaction, config); } catch {}
-    try { rankModule.handleInteraction?.(interaction, config); } catch {}
+    // Handle other modules if they have handleInteraction functions
+    try { await blsExamModule.handleInteraction?.(interaction, config); } catch {}
+    try { await timestampModule.handleInteraction?.(interaction, config); } catch {}
+    try { await promotionInfractionModule.handleInteraction?.(interaction, config); } catch {}
+    try { await logArrestModule.handleInteraction?.(interaction, config); } catch {}
+    try { await availableCallsignsModule.handleInteraction?.(interaction, config); } catch {}
+    try { await autoroleModule.handleInteraction?.(interaction, config); } catch {}
+    try { await rankModule.handleInteraction?.(interaction, config); } catch {}
 });
 
-// --- Additional Event Handlers ---
+// Register other event handlers (like BLS Exam)
 blsExamModule.registerExamHandlers(client, config);
 
 // Login
