@@ -37,7 +37,6 @@ const availableCallsignsModule = require('./Features/availablecallsigns');
 const autoroleModule = require('./Features/autorole'); 
 const blsExamModule = require('./Features/blsexam');
 const rankModule = require('./Features/rank');
-
 // NEW: Shift Management
 const shiftManageModule = require('./Features/ShiftManagement/shiftmanage');
 
@@ -46,7 +45,6 @@ const shiftManageModule = require('./Features/ShiftManagement/shiftmanage');
 // =========================
 client.once('ready', async () => {
     console.log(`Bot logged in as ${client.user.tag}!`);
-
     try {
         // Register commands
         await timestampModule.registerTimestampCommand(client, config);
@@ -55,10 +53,8 @@ client.once('ready', async () => {
         await availableCallsignsModule.registerAvailableCallsignsCommand(client, config);
         await autoroleModule.registerAutoRoleCommand(client, config);
         await rankModule.registerRankCommand(client, config);
-
         // NEW: Register /shift command
         await shiftManageModule.registerShiftManageCommand(client, config);
-
         console.log("✓ All feature modules initialized successfully.");
     } catch (err) {
         console.error("❌ Error registering commands/handlers:", err);
@@ -67,25 +63,12 @@ client.once('ready', async () => {
 
 // Register handlers BEFORE login
 blsExamModule.registerExamHandlers(client, config);
-
-// NEW: Shift Management button/logic handlers
-shiftManageModule.registerShiftManageHandlers(client, config);
+// NEW: Shift Management handlers (FIXED function name)
+shiftManageModule.registerShiftHandlers(client, config);
 
 // =========================
-// ✔ Global interactionCreate listener
-//    (Important to catch button clicks)
+// ✔ REMOVED conflicting global interactionCreate listener
+//    The shift management module handles its own interactions
 // =========================
-client.on('interactionCreate', async interaction => {
-    try {
-        if (interaction.isButton()) {
-            return shiftManageModule.handleButton(interaction, config);
-        }
-    } catch (err) {
-        console.error("Button handler error:", err);
-        if (!interaction.replied) {
-            await interaction.reply({ content: "An error occurred.", ephemeral: true });
-        }
-    }
-});
 
 client.login(process.env.DISCORD_TOKEN);
