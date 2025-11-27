@@ -12,7 +12,7 @@ async function registerShiftManageCommand(client, config) {
 
   await client.application.commands.create({ 
     ...data.toJSON(), 
-    guildId: config.GUILD_ID // for guild-specific registration
+    guildId: config.GUILD_ID // register in specific guild
   });
 }
 
@@ -76,9 +76,12 @@ async function handleInteraction(interaction, config) {
     }
     console.log('Log channel fetched:', logChannel.id);
 
+    // Prepare embed with proper footer
     const baseEmbed = new EmbedBuilder()
       .setAuthor({ name: 'Shift Management', iconURL: interaction.user.displayAvatarURL() })
-      .setFooter({ text: '' });
+      // Remove or replace the footer line
+      // .setFooter({ text: 'Shift Management' });
+      .setFooter({ text: 'Shift Management' });
 
     let embed;
 
@@ -220,8 +223,14 @@ async function handleInteraction(interaction, config) {
     });
   } catch (err) {
     console.error('Error in handleInteraction:', err);
-    throw err; // propagate to main handler
+    throw err; // propagate
   }
+}
+
+function formatDuration(minutes) {
+  const hrs = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hrs}h ${mins}m`;
 }
 
 module.exports = {
