@@ -41,7 +41,10 @@ const rankModule = require('./Features/rank');
 // NEW: Shift Management
 const shiftManageModule = require('./Features/ShiftManagement/shiftmanage');
 
-client.once('clientReady', async () => {
+// =========================
+// ✔ FIXED correct ready event
+// =========================
+client.once('ready', async () => {
     console.log(`Bot logged in as ${client.user.tag}!`);
 
     try {
@@ -56,16 +59,33 @@ client.once('clientReady', async () => {
         // NEW: Register /shift command
         await shiftManageModule.registerShiftManageCommand(client, config);
 
-        console.log(":white_check_mark: All feature modules initialized successfully.");
+        console.log("✓ All feature modules initialized successfully.");
     } catch (err) {
-        console.error(":x: Error registering commands/handlers:", err);
+        console.error("❌ Error registering commands/handlers:", err);
     }
 });
 
-// CRITICAL: Register event handlers BEFORE login
+// Register handlers BEFORE login
 blsExamModule.registerExamHandlers(client, config);
 
 // NEW: Shift Management button/logic handlers
 shiftManageModule.registerShiftManageHandlers(client, config);
+
+// =========================
+// ✔ Global interactionCreate listener
+//    (Important to catch button clicks)
+// =========================
+client.on('interactionCreate', async interaction => {
+    try {
+        if (interaction.isButton()) {
+            return shiftManageModule.handleButton(interaction, config);
+        }
+    } catch (err) {
+        console.error("Button handler error:", err);
+        if (!interaction.replied) {
+            await interaction.reply({ content: "An error occurred.", ephemeral: true });
+        }
+    }
+});
 
 client.login(process.env.DISCORD_TOKEN);
