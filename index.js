@@ -1,4 +1,3 @@
-// index.js (with safe button handling)
 const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -60,23 +59,19 @@ client.once('ready', async () => {
 // ---------------------------------------------- //
 
 // ---------------- EVENT HANDLERS ---------------- //
-// Exam & shift handlers before login
 blsExamModule.registerExamHandlers(client, config);
-shiftManageModule.registerShiftManageHandlers(client, config); // only for slash commands, NOT buttons
+shiftManageModule.registerShiftManageHandlers(client, config); // only slash commands, not buttons
 
-// Interaction handler for buttons
 client.on('interactionCreate', async (interaction) => {
     try {
-        if (interaction.isCommand()) return; // commands handled inside modules
+        if (interaction.isCommand()) return;
 
         if (interaction.isButton() && interaction.customId.startsWith("SHIFT_")) {
             console.log(`[DEBUG] Button pressed: ${interaction.customId} by ${interaction.user.tag}`);
 
-            // Defer immediately to prevent Unknown interaction errors
+            // ✅ Defer immediately to prevent unknown interaction
             if (!interaction.deferred && !interaction.replied) {
-                await interaction.deferUpdate().catch(err => {
-                    console.error("[WARN] deferUpdate failed:", err);
-                });
+                await interaction.deferUpdate().catch(err => console.error("[WARN] deferUpdate failed:", err));
             }
 
             // Pass to shift module
@@ -97,4 +92,3 @@ client.on('interactionCreate', async (interaction) => {
 client.login(process.env.DISCORD_TOKEN)
     .then(() => console.log("✅ Logged in successfully."))
     .catch(err => console.error("❌ Login failed:", err));
-// ---------------------------------------- //
