@@ -41,8 +41,8 @@ const rankModule = require('./Features/rank');
 // --- Shift Management Module ---
 const shiftManageModule = require('./Features/ShiftManagement/shiftmanage');
 
-// --- Event: clientReady ---
-client.once('clientReady', async () => {
+// --- Event: ready ---
+client.once('ready', async () => {
     console.log(`✅ Bot logged in as ${client.user.tag}!`);
 
     // --- Register Slash Commands ---
@@ -53,8 +53,6 @@ client.once('clientReady', async () => {
         await availableCallsignsModule.registerAvailableCallsignsCommand(client, config);
         await autoroleModule.registerAutoRoleCommand(client, config);
         await rankModule.registerRankCommand(client, config);
-        
-        // Register shift command properly with log
         await shiftManageModule.registerShiftManageCommand(client, config); 
 
         console.log("✅ All feature modules initialized successfully.");
@@ -63,10 +61,9 @@ client.once('clientReady', async () => {
     }
 });
 
-// --- Event: interactionCreate ---
+// --- Interaction Handler ---
 client.on('interactionCreate', async (interaction) => {
     try {
-        // Shift management interaction
         await shiftManageModule.handleInteraction(interaction, config);
     } catch (err) {
         console.error("❌ Error handling shift interaction:", err);
@@ -77,7 +74,7 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // Other modules that require interaction
+    // Other modules
     try { blsExamModule.handleInteraction?.(interaction, config); } catch {}
     try { timestampModule.handleInteraction?.(interaction, config); } catch {}
     try { promotionInfractionModule.handleInteraction?.(interaction, config); } catch {}
@@ -87,8 +84,8 @@ client.on('interactionCreate', async (interaction) => {
     try { rankModule.handleInteraction?.(interaction, config); } catch {}
 });
 
-// --- Register other event handlers ---
-blsExamModule.registerExamHandlers(client, config); 
+// --- Additional Event Handlers ---
+blsExamModule.registerExamHandlers(client, config);
 
 // Login
 client.login(process.env.DISCORD_TOKEN);
