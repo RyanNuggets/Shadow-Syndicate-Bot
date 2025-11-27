@@ -1,206 +1,266 @@
-const { SlashCommandBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
-const { SHIFT_TYPES } = require('../../config.json');
+// /Features/ShiftManagement/shiftmanage.js
+const {
+    SlashCommandBuilder,
+    PermissionFlagsBits,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    EmbedBuilder
+} = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 
-// Register command (called once on startup)
-async function registerShiftManageCommand(client, config) {
-  const commandData = new SlashCommandBuilder()
-    .setName('shift')
-    .setDescription('Manage shifts')
-    .addStringOption(option =>
-      option.setName('type')
-        .setDescription('Type of shift')
-        .setRequired(true));
+const DATA_PATH = path.join(__dirname, 'shiftData.json');
 
-  await client.application.commands.create({ 
-    ...commandData.toJSON(), 
-    guildId: config.GUILD_ID // register guild-specific
-  });
+// Load or create data file
+let shiftData = {};
+if (fs.existsSync(DATA_PATH)) {
+    shiftData = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
+} else {
+    fs.writeFileSync(DATA_PATH, JSON.stringify({}, null, 4));
 }
 
-// Main interaction handler
-async function handleInteraction(interaction, config) {
-  console.log('Received interaction:', interaction);
-  try {
-    if (!interaction.isChatInputCommand()) return;
-    if (interaction.commandName !== 'shift') return;
-
-    const shiftTypeKey = interaction.options.getString('type');
-    console.log('Shift type selected:', shiftTypeKey);
-
-    const shiftTypeData = SHIFT_TYPES[shiftTypeKey];
-    if (!shiftTypeData) {
-      console.log('Invalid shift type:', shiftTypeKey);
-      return interaction.reply({ content: `Invalid shift type: ${shiftTypeKey}`, ephemeral: true });
-    }
-
-    // Check role lock
-    const requiredRoleID = shiftTypeData.roleId;
-    if (!interaction.member.roles.cache.has(requiredRoleID)) {
-      return interaction.reply({ content: 'You do not have permission to manage this shift type.', ephemeral: true });
-    }
-
-    // Initialize data store
-    if (!interaction.client.shiftData) interaction.client.shiftData = {};
-    const shiftData = interaction.client.shiftData;
-
-    const userId = interaction.user.id;
-    if (!shiftData[userId]) {
-      shiftData[userId] = {
-        shiftCount: 0,
-        totalDuration: 0, // in minutes
-        shiftStartTime: null,
-        shiftType: shiftTypeKey,
-        shiftState: 'IDLE', // IDLE, ON_SHIFT, ON_BREAK
-        breakStartTime: null,
-        totalBreakTime: 0, // in seconds
-        lastBreakTime: 0, // in seconds
-      };
-    }
-
-    const userShift = shiftData[userId];
-
-    // Fetch log channel
-    const logChannel = await interaction.guild.channels.fetch(shiftTypeData.logChannel);
-    if (!logChannel) {
-      console.log('Log channel not found.');
-      return interaction.reply({ content: 'Log channel not found.', ephemeral: true });
-    }
-    console.log('Log channel:', logChannel.id);
-
-    // Build the base embed (no footer)
-    const baseEmbed = new EmbedBuilder()
-      .setAuthor({ name: 'Shift Management', iconURL: interaction.user.displayAvatarURL() });
-    // No footer
-
-    let embed;
-
-    // Set description based on shift state
-    if (userShift.shiftState === 'IDLE') {
-      embed = baseEmbed
-        .setTitle(`Shift Management | ${shiftTypeData.name}`)
-        .setDescription(`Shift Count: ${userShift.shiftCount}\nTotal Duration: ${formatDuration(userShift.totalDuration)}\nAverage Duration: ${userShift.shiftCount ? formatDuration(Math.floor(userShift.totalDuration / userShift.shiftCount)) : '0h 0m'}`);
-    } else if (userShift.shiftState === 'ON_SHIFT') {
-      embed = baseEmbed
-        .setTitle(`Shift Management | ${shiftTypeData.name}`)
-        .setDescription(`Shift Started`);
-    } else if (userShift.shiftState === 'ON_BREAK') {
-      embed = baseEmbed
-        .setTitle(`Shift Management | ${shiftTypeData.name}`)
-        .setDescription(`Break Started`);
-    }
-
-    // Send initial message
-    const message = await interaction.reply({ embeds: [embed], components: [], fetchReply: true });
-    console.log('Initial embed sent.');
-
-    // Create buttons
-    const startBtn = new ButtonBuilder()
-      .setCustomId('startShift')
-      .setLabel('Start')
-      .setStyle(ButtonStyle.Primary)
-      .setDisabled(userShift.shiftState !== 'IDLE');
-
-    const pauseBtn = new ButtonBuilder()
-      .setCustomId('pauseShift')
-      .setLabel('Pause')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(userShift.shiftState !== 'ON_SHIFT');
-
-    const endBtn = new ButtonBuilder()
-      .setCustomId('endShift')
-      .setLabel('End')
-      .setStyle(ButtonStyle.Danger)
-      .setDisabled(userShift.shiftState === 'IDLE');
-
-    const row = new ActionRowBuilder().addComponents(startBtn, pauseBtn, endBtn);
-
-    // Collector for buttons
-    const collector = message.createMessageComponentCollector({ time: 60 * 60 * 1000 });
-    collector.on('collect', async i => {
-      try {
-        if (i.user.id !== interaction.user.id) {
-          console.log('Interaction from another user.');
-          return i.reply({ content: 'This interaction is not for you.', ephemeral: true });
-        }
-
-        if (i.customId === 'startShift') {
-          if (userShift.shiftState !== 'IDLE') return;
-          userShift.shiftStartTime = Date.now();
-          userShift.shiftCount += 1;
-          userShift.shiftType = shiftTypeKey;
-          userShift.shiftState = 'ON_SHIFT';
-
-          await logChannel.send(`${interaction.user.tag} started shift of type ${shiftTypeData.name} at <t:${Math.floor(userShift.shiftStartTime / 1000)}:R>.`);
-
-          // Update embed
-          embed = baseEmbed
-            .setTitle(`Shift Management | ${shiftTypeData.name}`)
-            .setDescription(`Shift Started`);
-
-          const newRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('startShift').setLabel('Start').setStyle(ButtonStyle.Primary).setDisabled(true),
-            new ButtonBuilder().setCustomId('pauseShift').setLabel('Pause').setStyle(ButtonStyle.Secondary).setDisabled(false),
-            new ButtonBuilder().setCustomId('endShift').setLabel('End').setStyle(ButtonStyle.Danger).setDisabled(false)
-          );
-          await i.update({ embeds: [embed], components: [newRow] });
-        } else if (i.customId === 'pauseShift') {
-          if (userShift.shiftState !== 'ON_SHIFT') return;
-          userShift.breakStartTime = Date.now();
-          userShift.shiftState = 'ON_BREAK';
-
-          await logChannel.send(`${interaction.user.tag} started break at <t:${Math.floor(userShift.breakStartTime / 1000)}:R>.`);
-
-          // Update embed
-          embed = baseEmbed
-            .setTitle(`Shift Management | ${shiftTypeData.name}`)
-            .setDescription(`Break Started`);
-
-          const newRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('startShift').setLabel('Start').setStyle(ButtonStyle.Primary).setDisabled(true),
-            new ButtonBuilder().setCustomId('pauseShift').setLabel('Pause').setStyle(ButtonStyle.Secondary).setDisabled(true),
-            new ButtonBuilder().setCustomId('endShift').setLabel('End').setStyle(ButtonStyle.Danger).setDisabled(false)
-          );
-          await i.update({ embeds: [embed], components: [newRow] });
-        } else if (i.customId === 'endShift') {
-          if (userShift.shiftState === 'IDLE') return;
-
-          const shiftEndTime = Date.now();
-          const shiftDurationMinutes = Math.floor((shiftEndTime - userShift.shiftStartTime) / (1000 * 60));
-          userShift.totalDuration += shiftDurationMinutes;
-
-          // Reset shift
-          userShift.shiftStartTime = null;
-          userShift.breakStartTime = null;
-          userShift.shiftState = 'IDLE';
-
-          await logChannel.send(`${interaction.user.tag} ended shift at <t:${Math.floor(shiftEndTime / 1000)}:R>. Total time: ${shiftDurationMinutes} minutes.`);
-
-          const avgDur = Math.floor(userShift.totalDuration / userShift.shiftCount);
-          const summaryEmbed = new EmbedBuilder()
-            .setAuthor({ name: 'Shift Management', iconURL: interaction.user.displayAvatarURL() })
-            .setTitle(`Shift Management | ${shiftTypeData.name}`)
-            .setDescription(`Shift Count: ${userShift.shiftCount}\nTotal Duration: ${formatDuration(userShift.totalDuration)}\nAverage Duration: ${formatDuration(avgDur)}`);
-
-          await i.update({ embeds: [summaryEmbed], components: [] });
-        }
-      } catch (err) {
-        console.error('Error during button interaction:', err);
-        await i.reply({ content: 'There was an error processing your shift action.', ephemeral: true });
-      }
-    });
-  } catch (err) {
-    console.error('Error in handleInteraction:', err);
-    throw err;
-  }
-}
-
-function formatDuration(minutes) {
-  const hrs = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return `${hrs}h ${mins}m`;
+function saveData() {
+    fs.writeFileSync(DATA_PATH, JSON.stringify(shiftData, null, 4));
 }
 
 module.exports = {
-  registerShiftManageCommand,
-  handleInteraction,
+    registerShiftManageCommand,
+    registerShiftManageHandlers
 };
+
+async function registerShiftManageCommand(client, config) {
+    const commands = client.application.commands;
+
+    await commands.create(
+        new SlashCommandBuilder()
+            .setName('shift')
+            .setDescription('Shift management commands')
+            .addSubcommand(sub =>
+                sub.setName('manage')
+                    .setDescription('Start managing your shift')
+                    .addStringOption(opt =>
+                        opt.setName('type')
+                            .setDescription('Shift Type')
+                            .setRequired(true)
+                            .addChoices(
+                                ...Object.keys(config.SHIFT_TYPES).map(type => ({
+                                    name: type,
+                                    value: type
+                                }))
+                            )
+                    )
+            )
+    );
+
+    console.log("✅ /shift manage registered");
+}
+
+function registerShiftManageHandlers(client, config) {
+    client.on('interactionCreate', async interaction => {
+        if (interaction.isChatInputCommand()) {
+            if (interaction.commandName === "shift" && interaction.options.getSubcommand() === "manage") {
+                await handleShiftManage(interaction, config);
+            }
+        }
+
+        if (interaction.isButton()) {
+            if (!interaction.customId.startsWith("SHIFT_")) return;
+            await handleShiftButtons(interaction, config);
+        }
+    });
+}
+
+async function handleShiftManage(interaction, config) {
+    const user = interaction.user;
+    const shiftType = interaction.options.getString('type');
+    const typeInfo = config.SHIFT_TYPES[shiftType];
+
+    if (!typeInfo) 
+        return interaction.reply({ content: "❌ Invalid shift type.", ephemeral: true });
+
+    const requiredRole = typeInfo.role;
+    if (!interaction.member.roles.cache.has(requiredRole)) {
+        return interaction.reply({ content: "❌ You don't have permission to start this shift type.", ephemeral: true });
+    }
+
+    // Initialize user data if not exists
+    if (!shiftData[user.id]) {
+        shiftData[user.id] = {
+            allTimeCount: 0,
+            allTimeDuration: 0,
+            lastShift: null
+        };
+        saveData();
+    }
+
+    const embed = new EmbedBuilder()
+        .setAuthor({ name: `Shift Management | ${shiftType}`, iconURL: user.displayAvatarURL() })
+        .setTitle("All Time Information")
+        .setDescription(
+            `**Shift Count:** ${shiftData[user.id].allTimeCount}\n` +
+            `**Total Duration:** ${formatDuration(shiftData[user.id].allTimeDuration)}\n` +
+            `**Average Duration:** ${formatDuration(
+                shiftData[user.id].allTimeCount === 0
+                    ? 0
+                    : Math.floor(shiftData[user.id].allTimeDuration / shiftData[user.id].allTimeCount)
+            )}`
+        );
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`SHIFT_START_${shiftType}`).setLabel("Start").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`SHIFT_PAUSE`).setLabel("Pause").setStyle(ButtonStyle.Secondary).setDisabled(true),
+        new ButtonBuilder().setCustomId(`SHIFT_END`).setLabel("End").setStyle(ButtonStyle.Danger).setDisabled(true)
+    );
+
+    await interaction.reply({ embeds: [embed], components: [row] });
+}
+
+async function handleShiftButtons(interaction, config) {
+    const user = interaction.user;
+    const uid = user.id;
+
+    if (!shiftData[uid]) {
+        shiftData[uid] = {
+            allTimeCount: 0,
+            allTimeDuration: 0,
+            lastShift: null
+        };
+    }
+
+    let shift = shiftData[uid].activeShift || null;
+
+    // START SHIFT
+    if (interaction.customId.startsWith("SHIFT_START")) {
+        const shiftType = interaction.customId.replace("SHIFT_START_", "");
+        const typeInfo = config.SHIFT_TYPES[shiftType];
+
+        const now = Date.now();
+
+        shiftData[uid].activeShift = {
+            type: shiftType,
+            started: now,
+            breakTotal: 0,
+            lastBreakStart: null
+        };
+        saveData();
+
+        const embed = new EmbedBuilder()
+            .setAuthor({ name: `Shift Management | ${shiftType}`, iconURL: user.displayAvatarURL() })
+            .setTitle("Shift Started")
+            .setDescription(
+                "**Current Shift**\n" +
+                "**Status:** On Shift\n" +
+                `**Started:** <t:${Math.floor(now / 1000)}:R>`
+            );
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId("START_DISABLED").setLabel("Start").setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId("SHIFT_PAUSE").setLabel("Pause").setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId("SHIFT_END").setLabel("End").setStyle(ButtonStyle.Danger)
+        );
+
+        await interaction.update({ embeds: [embed], components: [row] });
+
+        // Log
+        const channel = interaction.client.channels.cache.get(typeInfo.logChannel);
+        if (channel) {
+            channel.send(`📗 **Shift Started** — <@${uid}> (${shiftType})`);
+        }
+
+        return;
+    }
+
+    // PAUSE SHIFT
+    if (interaction.customId === "SHIFT_PAUSE") {
+        shift = shiftData[uid].activeShift;
+        if (!shift) return interaction.reply({ content: "❌ No active shift.", ephemeral: true });
+
+        shift.lastBreakStart = Date.now();
+        saveData();
+
+        const embed = new EmbedBuilder()
+            .setAuthor({ name: `Shift Management | ${shift.type}`, iconURL: user.displayAvatarURL() })
+            .setTitle("Break Started")
+            .setDescription(
+                "**Current Shift**\n" +
+                "**Status:** On Break\n" +
+                `**Shift Started:** <t:${Math.floor(shift.started / 1000)}:R>\n` +
+                `**Break Started:** <t:${Math.floor(shift.lastBreakStart / 1000)}:R>`
+            );
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId("START_DISABLED").setLabel("Start").setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId("PAUSE_DISABLED").setLabel("Pause").setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId("SHIFT_END").setLabel("End").setStyle(ButtonStyle.Danger)
+        );
+
+        await interaction.update({ embeds: [embed], components: [row] });
+        return;
+    }
+
+    // END SHIFT FROM BREAK OR ACTIVE
+    if (interaction.customId === "SHIFT_END") {
+        shift = shiftData[uid].activeShift;
+        if (!shift) return interaction.reply({ content: "❌ No active shift.", ephemeral: true });
+
+        const now = Date.now();
+
+        // If currently in break, count break
+        if (shift.lastBreakStart) {
+            shift.breakTotal += now - shift.lastBreakStart;
+        }
+
+        const totalShift = now - shift.started;
+        const cleanTime = totalShift - shift.breakTotal;
+
+        shiftData[uid].allTimeCount++;
+        shiftData[uid].allTimeDuration += cleanTime;
+        shiftData[uid].lastShift = {
+            status: "Ended",
+            totalTime: cleanTime
+        };
+
+        delete shiftData[uid].activeShift;
+        saveData();
+
+        const embed = new EmbedBuilder()
+            .setAuthor({ name: `Shift Management | ${shift.type}`, iconURL: user.displayAvatarURL() })
+            .setTitle("All Time Information")
+            .setDescription(
+                `**Shift Count:** ${shiftData[uid].allTimeCount}\n` +
+                `**Total Duration:** ${formatDuration(shiftData[uid].allTimeDuration)}\n` +
+                `**Average Duration:** ${formatDuration(shiftData[uid].allTimeDuration / shiftData[uid].allTimeCount)}\n\n` +
+                "__Last Shift__\n" +
+                `**Status:** Ended\n` +
+                `**Total Time:** ${formatDuration(cleanTime)}`
+            );
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId("SHIFT_START_" + shift.type).setLabel("Start").setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId("PAUSE_DISABLED").setLabel("Pause").setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId("END_DISABLED").setLabel("End").setStyle(ButtonStyle.Danger).setDisabled(true)
+        );
+
+        await interaction.update({ embeds: [embed], components: [row] });
+
+        const typeInfo = config.SHIFT_TYPES[shift.type];
+        const channel = interaction.client.channels.cache.get(typeInfo.logChannel);
+        if (channel) channel.send(`📕 **Shift Ended** — <@${uid}> (${shift.type}) — ${formatDuration(cleanTime)}`);
+
+        return;
+    }
+}
+
+function formatDuration(ms) {
+    if (!ms || ms < 1000) return ms + "ms";
+
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return `${sec} Seconds`;
+
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min} Minutes`;
+
+    const hr = Math.floor(min / 60);
+    return `${hr} Hours ${min % 60} Minutes`;
+}
