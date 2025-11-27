@@ -65,11 +65,13 @@ module.exports = {
         const data = loadData();
 
         client.on("interactionCreate", async interaction => {
+
             // ----------------------
             // Slash Command Handler
             // ----------------------
             if (interaction.isChatInputCommand() && interaction.commandName === "shift") {
-                await interaction.deferReply({ ephemeral: true });
+                // ❗ MAKE IT PUBLIC
+                await interaction.deferReply({ ephemeral: false });
 
                 const sub = interaction.options.getSubcommand();
                 if (sub === "manage") {
@@ -99,10 +101,9 @@ module.exports = {
 
                     saveData(data);
 
-                    // Return main panel
                     return interaction.editReply({
                         embeds: [createMainPanel(interaction.user, data[userId], settings.name)],
-                        components: [createButtons("START")]
+                        components: [createButtons("START", type)]
                     });
                 }
             }
@@ -120,7 +121,7 @@ module.exports = {
 
             const logChannel = await interaction.guild.channels.fetch(settings.logChannel);
 
-            await interaction.deferUpdate();
+            await interaction.deferUpdate(); // stays public
 
             // Ensure user entry exists
             if (!data[userId]) {
@@ -132,7 +133,7 @@ module.exports = {
                 };
             }
 
-            // Temp shift session memory (not stored in file)
+            // Temp memory
             if (!global.shiftSessions) global.shiftSessions = {};
             if (!global.shiftSessions[userId]) {
                 global.shiftSessions[userId] = {
@@ -238,7 +239,6 @@ function embedShiftStarted(user, type, session) {
         .setAuthor({ name: `Shift Management | ${type}`, iconURL: user.displayAvatarURL() })
         .setTitle("Shift Started")
         .setDescription(
-            `**Current Shift**\n` +
             `**Status:** On Shift\n` +
             `**Started:** <t:${Math.floor(session.startedAt / 1000)}:R>`
         )
@@ -250,7 +250,6 @@ function embedBreakStarted(user, type, session) {
         .setAuthor({ name: `Shift Management | ${type}`, iconURL: user.displayAvatarURL() })
         .setTitle("Break Started")
         .setDescription(
-            `**Current Shift**\n` +
             `**Status:** On Break\n` +
             `**Shift Started:** <t:${Math.floor(session.startedAt / 1000)}:R>\n` +
             `**Break Started:** <t:${Math.floor(session.breakStart / 1000)}:R>`
@@ -263,7 +262,6 @@ function embedBreakEnded(user, type, session) {
         .setAuthor({ name: `Shift Management | ${type}`, iconURL: user.displayAvatarURL() })
         .setTitle("Break Ended")
         .setDescription(
-            `**Current Shift**\n` +
             `**Status:** On Shift\n` +
             `**Started:** <t:${Math.floor(session.startedAt / 1000)}:R>\n` +
             `**Total Break Time:** ${formatDuration(session.totalBreak)}\n` +
@@ -283,7 +281,7 @@ function embedShiftEnded(user, type, stats) {
         )
         .addFields({
             name: "Last Shift",
-            value: `**Status:** Ended\n**Total Time:** ${formatDuration(stats.lastShift)}`
+            value: `**Total:** ${formatDuration(stats.lastShift)}`
         })
         .setColor("#2b2d31");
 }
