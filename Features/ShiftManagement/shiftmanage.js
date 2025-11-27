@@ -1,7 +1,6 @@
 // /Features/ShiftManagement/shiftmanage.js
 const {
     SlashCommandBuilder,
-    PermissionFlagsBits,
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
@@ -26,7 +25,8 @@ function saveData() {
 
 module.exports = {
     registerShiftManageCommand,
-    registerShiftManageHandlers
+    registerShiftManageHandlers,
+    handleShiftButtons
 };
 
 async function registerShiftManageCommand(client, config) {
@@ -56,26 +56,21 @@ async function registerShiftManageCommand(client, config) {
     console.log("✅ /shift manage registered");
 }
 
+// Only register slash commands handler (no button handling here!)
 function registerShiftManageHandlers(client, config) {
     client.on('interactionCreate', async interaction => {
         try {
-            if (interaction.isChatInputCommand()) {
-                if (interaction.commandName === "shift" && interaction.options.getSubcommand() === "manage") {
-                    console.log(`[DEBUG] Shift manage command triggered by ${interaction.user.tag}`);
-                    await handleShiftManage(interaction, config);
-                }
-            }
+            if (!interaction.isChatInputCommand()) return;
 
-            if (interaction.isButton()) {
-                if (!interaction.customId.startsWith("SHIFT_")) return;
-                console.log(`[DEBUG] Shift button clicked: ${interaction.customId} by ${interaction.user.tag}`);
-                await handleShiftButtons(interaction, config);
+            if (interaction.commandName === "shift" && interaction.options.getSubcommand() === "manage") {
+                console.log(`[DEBUG] Shift manage command triggered by ${interaction.user.tag}`);
+                await handleShiftManage(interaction, config);
             }
         } catch (err) {
-            console.error("❌ Error handling interaction:", err);
+            console.error("❌ Error in shift command handler:", err);
             if (!interaction.replied && !interaction.deferred) {
                 try {
-                    await interaction.reply({ content: "⚠️ Interaction expired or failed.", ephemeral: true });
+                    await interaction.reply({ content: "⚠️ Interaction failed.", ephemeral: true });
                 } catch {}
             }
         }
@@ -123,8 +118,8 @@ async function handleShiftManage(interaction, config) {
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`SHIFT_START_${shiftType}`).setLabel("Start").setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId(`SHIFT_PAUSE`).setLabel("Pause").setStyle(ButtonStyle.Secondary).setDisabled(true),
-            new ButtonBuilder().setCustomId(`SHIFT_END`).setLabel("End").setStyle(ButtonStyle.Danger).setDisabled(true)
+            new ButtonBuilder().setCustomId("SHIFT_PAUSE").setLabel("Pause").setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId("SHIFT_END").setLabel("End").setStyle(ButtonStyle.Danger).setDisabled(true)
         );
 
         await interaction.reply({ embeds: [embed], components: [row] });
@@ -153,7 +148,6 @@ async function handleShiftButtons(interaction, config) {
         if (interaction.customId.startsWith("SHIFT_START")) {
             const shiftType = interaction.customId.replace("SHIFT_START_", "");
             const typeInfo = config.SHIFT_TYPES[shiftType];
-
             const now = Date.now();
 
             shiftData[uid].activeShift = {
@@ -179,7 +173,7 @@ async function handleShiftButtons(interaction, config) {
                 new ButtonBuilder().setCustomId("SHIFT_END").setLabel("End").setStyle(ButtonStyle.Danger)
             );
 
-            await interaction.update({ embeds: [embed], components: [row] });
+            await interaction.editReply({ embeds: [embed], components: [row] });
             console.log(`[DEBUG] Shift started for ${user.tag}`);
 
             const channel = interaction.client.channels.cache.get(typeInfo.logChannel);
@@ -190,7 +184,7 @@ async function handleShiftButtons(interaction, config) {
         // PAUSE SHIFT
         if (interaction.customId === "SHIFT_PAUSE") {
             shift = shiftData[uid].activeShift;
-            if (!shift) return interaction.reply({ content: "❌ No active shift.", ephemeral: true });
+            if (!shift) return interaction.followUp({ content: "❌ No active shift.", ephemeral: true });
 
             shift.lastBreakStart = Date.now();
             saveData();
@@ -211,7 +205,7 @@ async function handleShiftButtons(interaction, config) {
                 new ButtonBuilder().setCustomId("SHIFT_END").setLabel("End").setStyle(ButtonStyle.Danger)
             );
 
-            await interaction.update({ embeds: [embed], components: [row] });
+            await interaction.editReply({ embeds: [embed], components: [row] });
             console.log(`[DEBUG] Break started for ${user.tag}`);
             return;
         }
@@ -219,7 +213,7 @@ async function handleShiftButtons(interaction, config) {
         // END SHIFT
         if (interaction.customId === "SHIFT_END") {
             shift = shiftData[uid].activeShift;
-            if (!shift) return interaction.reply({ content: "❌ No active shift.", ephemeral: true });
+            if (!shift) return interaction.followUp({ content: "❌ No active shift.", ephemeral: true });
 
             const now = Date.now();
             if (shift.lastBreakStart) shift.breakTotal += now - shift.lastBreakStart;
@@ -255,7 +249,7 @@ async function handleShiftButtons(interaction, config) {
                 new ButtonBuilder().setCustomId("END_DISABLED").setLabel("End").setStyle(ButtonStyle.Danger).setDisabled(true)
             );
 
-            await interaction.update({ embeds: [embed], components: [row] });
+            await interaction.editReply({ embeds: [embed], components: [row] });
             console.log(`[DEBUG] Shift ended for ${user.tag} — Duration: ${cleanTime}ms`);
 
             const typeInfo = config.SHIFT_TYPES[shift.type];
@@ -267,7 +261,7 @@ async function handleShiftButtons(interaction, config) {
         console.error("❌ Error in handleShiftButtons:", err);
         if (!interaction.replied && !interaction.deferred) {
             try {
-                await interaction.reply({ content: "⚠️ Interaction expired or failed.", ephemeral: true });
+                await interaction.followUp({ content: "⚠️ Interaction expired or failed.", ephemeral: true });
             } catch {}
         }
     }
