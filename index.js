@@ -1,4 +1,4 @@
-// index.js
+// index.js (fixed for interaction timing)
 const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -34,8 +34,6 @@ const availableCallsignsModule = require('./Features/availablecallsigns');
 const autoroleModule = require('./Features/autorole');
 const blsExamModule = require('./Features/blsexam');
 const rankModule = require('./Features/rank');
-
-// SHIFT MODULE — ADDED
 const shiftManageModule = require('./Features/ShiftManagement/shiftmanage');
 
 client.once('ready', async () => {
@@ -61,5 +59,25 @@ client.once('ready', async () => {
 // Event handlers BEFORE login
 blsExamModule.registerExamHandlers(client, config);
 shiftManageModule.registerShiftManageHandlers(client, config);
+
+// NEW: interactionCreate handler for buttons & commands
+client.on('interactionCreate', async (interaction) => {
+    try {
+        if (interaction.isCommand()) {
+            // Commands are already handled in individual modules
+            return;
+        }
+
+        if (interaction.isButton()) {
+            // **Important: defer immediately to avoid Unknown Interaction**
+            await interaction.deferUpdate();
+
+            // Then pass to shiftManage module handler
+            await shiftManageModule.handleShiftButtons(interaction, config);
+        }
+    } catch (err) {
+        console.error("❌ Error handling interaction:", err);
+    }
+});
 
 client.login(process.env.DISCORD_TOKEN);
