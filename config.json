@@ -30,6 +30,26 @@
     "AUTOROLE_ROLE": "1437715613463089242",
     "AUTOROLE_LOG_CHANNEL": "1437716075843293294"
   },
+  "SHIFT_MANAGEMENT": {
+  "SHIFT_TYPES": [
+    {
+      "name": "Main DHS",
+      "duration": 60,
+      "requiredRole": "1437715826634526821"
+    },
+    {
+      "name": "RIG", 
+      "duration": 30,
+      "requiredRole": "1437715826634526821"
+    },
+    {
+      "name": "HSI",
+      "duration": 45, 
+      "requiredRole": "1437715826634526821"
+    }
+  ],
+  "LOG_CHANNEL": "1437716208597205054"
+},
   "QUOTA_SETTINGS": {
     "QUOTA_COMMAND_PERMISSION_ROLE": "1437715613463089242",
     "GRACE_PERIOD_MINUTES": 10,
@@ -103,29 +123,6 @@
     "LASD": {
       "emoji": "<:LASD:1438834657436373064>",
       "rankId": 2
-    }
-  },
-
-  "SHIFT_MANAGEMENT": {
-    "TYPES": {
-      "DHS": {
-        "name": "Main DHS",
-        "role": "1437715826634526821",
-        "logChannel": "1443333646260895935",
-        "duration": 60
-      },
-      "RIG": {
-        "name": "RIG",
-        "role": "1437715745185464401",
-        "logChannel": "1443333646260895935",
-        "duration": 30
-      },
-      "HSI": {
-        "name": "HSI",
-        "role": "1437715770825244782",
-        "logChannel": "1443333646260895935",
-        "duration": 45
-      }
     }
   }
 }
