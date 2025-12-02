@@ -35,8 +35,9 @@ const promotionInfractionModule = require('./Features/promotion-infraction');
 const logArrestModule = require('./Features/logarrest');
 const availableCallsignsModule = require('./Features/availablecallsigns'); 
 const autoroleModule = require('./Features/autorole'); 
-const blsExamModule = require('./Features/blsexam'); // Require the BLS Exam module
-const rankModule = require('./Features/rank'); // <-- Added rank module
+const blsExamModule = require('./Features/blsexam'); 
+const rankModule = require('./Features/rank'); 
+const qotdModule = require('./Features/qotd'); // <-- QOTD Module
 
 client.once('clientReady', async () => {
     console.log(`Bot logged in as ${client.user.tag}!`);
@@ -48,10 +49,9 @@ client.once('clientReady', async () => {
         await logArrestModule.registerLogArrestCommand(client, config);
         await availableCallsignsModule.registerAvailableCallsignsCommand(client, config);
         await autoroleModule.registerAutoRoleCommand(client, config);
-
-        await rankModule.registerRankCommand(client, config); // <-- Register /rank command
-
-        // NOTE: BLS Exam event handlers are registered below, outside this block.
+        await rankModule.registerRankCommand(client, config);
+        
+        await qotdModule.registerQotdHandlers(client, config); // <-- Registers QOTD + QOTDList
 
         console.log("✅ All feature modules initialized successfully.");
     } catch (err) {
