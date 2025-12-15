@@ -2,8 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBui
 const config = require('../config.json');
 
 // In-memory state storage. 
-// Note: This resets if the bot restarts. For persistence, use a database (SQLite/Mongo).
-// Structure: guildId -> { voters: Set(), pollMessageId: string, hostId: string, startTime: number, status: string, startReason: string }
+// Structure: guildId -> { voters: Set(), pollMessageId: string, startupMessageId: string, hostId: string, startTime: number, status: string, startReason: string }
 const sessionState = new Map();
 
 module.exports = {
@@ -57,6 +56,7 @@ module.exports = {
             sessionState.set(guildId, {
                 voters: new Set(),
                 pollMessageId: null,
+                startupMessageId: null,
                 hostId: interaction.user.id,
                 startTime: null,
                 status: 'IDLE',
@@ -99,15 +99,6 @@ module.exports = {
                         });
                     }
                 }
-
-                // Update the Management Panel (We need to find the original interaction or store a reference)
-                // Since we can't easily edit the ephemeral/original interaction from here without storing the webhook/interaction token,
-                // we rely on the person managing the session to refresh or interactions to update state.
-                // However, strictly following the prompt: "when vote button clicked... it updates to (1) Vote" (Handled above).
-                
-                // If the prompt implies the Management Embed updates dynamically when someone votes, 
-                // we would need to store the management interaction object, but interactions expire after 15 mins.
-                // For this scope, we update the poll button immediately. The management panel updates when the host interacts with it.
             }
         }
 
@@ -237,11 +228,11 @@ module.exports = {
                     state.voters.clear();
                 }
 
+                // Determine text additions based on whether it was a poll
                 state.startReason = wasPoll 
-                    ? `after a poll with ${voteCount} votes` 
-                    : `after a poll with 0 votes`; // As per prompt logic for direct start
+                    ? `The session was started after a poll with ${voteCount} votes.` 
+                    : ''; 
 
-                // Send Server Startup Message
                 const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
                 if (pollChannel) {
                     // Delete Poll Message if it exists
@@ -252,29 +243,26 @@ module.exports = {
                         } catch (e) { }
                     }
 
-                    await pollChannel.send({
+                    // Send Startup Message and save ID
+                    const startupMsg = await pollChannel.send({
                         content: `**Server Status**\nA server startup has just been hosted! The server is now open for all players to join. Please ensure you follow all server rules and enjoy the session. Join instantly by [clicking here](https://policeroleplay.community/join/LARPJ) or join by using code "LARPJ".`
                     });
+                    state.startupMessageId = startupMsg.id;
                 }
 
                 // Update Manager Panel
                 const activeEmbed = new EmbedBuilder()
                     .setTitle(`${config.emojis.crpc} Active Session`)
-                    .setDescription(`The session was started by <@${state.hostId}> <t:${state.startTime}:R>. The session was started ${state.startReason}.`)
+                    .setDescription(`The session was started by <@${state.hostId}> <t:${state.startTime}:R>. ${state.startReason}`)
                     .setColor('#2ecc71');
 
                 const logsEmbed = new EmbedBuilder()
                     .setTitle(`${config.emojis.crpc} Session Logs`)
                     .setColor('#2b2d31');
 
-                // Construct Logs Description based on path
+                // Construct Logs Description
                 let logsDesc = `${config.emojis.arrow} Session startup message was posted on <t:${Math.floor(Date.now()/1000)}>.\n`;
-                if (!wasPoll) {
-                    // Direct start logic description based on prompt
-                    // Prompt says: "Session was started by [user] after a poll with 0 votes on [timestamp]" isn't strictly requested for Direct Start in prompt logic 2, 
-                    // but the prompt example for "if start session clicked" (Direct) implies specific log format.
-                    // Actually, prompt part 3 (Direct Start) says: "<:rightarrow:...> Session startup message was posted on [timestamp]." only.
-                } else {
+                if (wasPoll) {
                     logsDesc += `${config.emojis.arrow} Session was started by <@${state.hostId}> after a poll with ${voteCount} votes on <t:${Math.floor(Date.now()/1000)}>.`;
                 }
 
@@ -300,22 +288,32 @@ module.exports = {
                     const boostEmbed = new EmbedBuilder()
                         .setTitle(`${config.emojis.crpc} Session is still active!`)
                         .setDescription('The session is still ongoing. Join up!')
-                        .setColor('#00ff00'); // Green or custom color
+                        .setColor('#00ff00');
                     
                     await pollChannel.send({ embeds: [boostEmbed] });
                 }
-                // Acknowledge interaction without changing the panel
                 await interaction.deferUpdate();
             }
 
             // 6. SHUTDOWN SESSION
             else if (selected === 'shutdown_session') {
-                // Delete Bot Messages (Conceptual: In a real bot, you'd store the IDs of every message the bot sent in an array in `state` and loop delete them).
-                // Since the prompt says "deletes bot messages", we usually assume the announcement ones.
-                
-                // For this implementation, we simply send the shutdown message to the channel.
                 const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
+                
+                // Cleanup: Delete Startup Message and Poll Message if they exist
                 if (pollChannel) {
+                    if (state.startupMessageId) {
+                        try {
+                            const msg = await pollChannel.messages.fetch(state.startupMessageId);
+                            if (msg) await msg.delete();
+                        } catch (e) { }
+                    }
+                    if (state.pollMessageId) {
+                        try {
+                            const msg = await pollChannel.messages.fetch(state.pollMessageId);
+                            if (msg) await msg.delete();
+                        } catch (e) { }
+                    }
+
                     await pollChannel.send({
                         content: `**Server Status**\nThe server is now shutting down. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`
                     });
