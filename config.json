@@ -4,7 +4,8 @@
     "guildId": "1437715430545428553",
     "channels": {
         "pollAnnouncement": "1450157004596449414",
-        "adminNotification": "1450157016809996479"
+        "adminNotification": "1450157016809996479",
+        "actionLog": "1450158615573958857"
     },
     "roles": {
         "pollPing": "1447706606614741113",
