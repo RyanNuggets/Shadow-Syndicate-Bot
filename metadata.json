@@ -1,0 +1,5 @@
+{
+  "name": "Roleplay Session Manager Bot",
+  "description": "A Discord.js bot module for managing roleplay sessions, polls, and server status updates.",
+  "requestFramePermissions": []
+}
