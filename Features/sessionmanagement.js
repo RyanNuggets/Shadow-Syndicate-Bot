@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBui
 const config = require('../config.json');
 
 // In-memory state storage. 
-// Structure: guildId -> { voters: Set(), pollMessageId: string, startupMessageId: string, shutdownMessageId: string, boostMessageIds: [], sessionLogs: [], managementMessageId: string, managementChannelId: string, hostId: string, startTime: number, status: string, startReason: string }
+// Structure: guildId -> { voters: Set(), pollMessageId: string, startupMessageId: string, shutdownMessageId: string, boostMessageIds: [], sessionLogs: [], managementMessageId: string, managementChannelId: string, hostId: string, startTime: number, status: string, startReason: string, statsInterval: IntervalID }
 const sessionState = new Map();
 
 // Helper to get or initialize state
@@ -20,7 +20,8 @@ function getOrInitState(guildId) {
             hostId: null,
             startTime: null,
             status: 'IDLE',
-            startReason: ''
+            startReason: '',
+            statsInterval: null
         });
     }
     return sessionState.get(guildId);
@@ -79,6 +80,14 @@ async function fetchServerStats() {
     }
 }
 
+// Helper to clear existing stats interval
+function clearStatsInterval(state) {
+    if (state.statsInterval) {
+        clearInterval(state.statsInterval);
+        state.statsInterval = null;
+    }
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('session')
@@ -119,11 +128,11 @@ module.exports = {
                         ])
                 );
 
-            // Fetch reply to get the message ID for future updates
-            const response = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
+            await interaction.reply({ embeds: [embed], components: [row] });
+            const message = await interaction.fetchReply();
             
             // Store management panel details
-            state.managementMessageId = response.id;
+            state.managementMessageId = message.id;
             state.managementChannelId = interaction.channelId;
         }
     },
@@ -206,7 +215,7 @@ module.exports = {
 
                 const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
                 if (pollChannel) {
-                    // BUG FIX: Delete leftover shutdown message from previous session if it exists
+                    // Delete leftover shutdown message from previous session if it exists
                     if (state.shutdownMessageId) {
                         try {
                             const ssdMsg = await pollChannel.messages.fetch(state.shutdownMessageId);
@@ -290,17 +299,21 @@ module.exports = {
                 // Send Shutdown Message
                 const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
                 if (pollChannel) {
-                    // Shutdown Embed with Image
-                    const ssdEmbed = new EmbedBuilder()
-                        .setImage(config.images.shutdown)
+                    // Shutdown Embeds (Dual Embeds)
+                    const imageEmbed = new EmbedBuilder()
+                        .setColor('#ff0000');
+                    if (config.images && config.images.shutdown) {
+                        imageEmbed.setImage(config.images.shutdown);
+                    }
+
+                    const textEmbed = new EmbedBuilder()
                         .setDescription(`The server has shutdown. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`)
                         .setColor('#ff0000');
-
+                    
                     const ssdMsg = await pollChannel.send({
-                        content: `**Server Status**`,
-                        embeds: [ssdEmbed]
+                        embeds: [imageEmbed, textEmbed]
                     });
-                    state.shutdownMessageId = ssdMsg.id; // Store for next session
+                    state.shutdownMessageId = ssdMsg.id;
                 }
 
                 // Reset Panel
@@ -320,6 +333,7 @@ module.exports = {
                 );
 
                 // Reset session state
+                clearStatsInterval(state);
                 state.status = 'IDLE';
                 state.voters.clear();
                 state.pollMessageId = null;
@@ -340,6 +354,7 @@ module.exports = {
                 const voteCount = state.voters.size;
                 state.status = 'ACTIVE';
                 state.sessionLogs = []; // Reset logs
+                clearStatsInterval(state); // Ensure no duplicate intervals
                 
                 if (!wasPoll) {
                     state.hostId = interaction.user.id;
@@ -373,9 +388,14 @@ module.exports = {
                         } catch (e) { }
                     }
 
-                    // Send Startup Embed with Image and Stats
-                    const startupEmbed = new EmbedBuilder()
-                        .setImage(config.images.startup)
+                    // Send Startup Embeds (Dual Embeds)
+                    const imageEmbed = new EmbedBuilder()
+                        .setColor('#2ecc71');
+                    if (config.images && config.images.startup) {
+                        imageEmbed.setImage(config.images.startup);
+                    }
+
+                    const textEmbed = new EmbedBuilder()
                         .setDescription(`A server startup has been hosted! The server is now open for all players to join. Please ensure you follow all server rules and enjoy the session. Join instantly by [clicking here](https://policeroleplay.community/join/chicagoRPC) or join by using code "chicagoRPC".`)
                         .addFields(
                             { name: '`Server Player Count:`', value: `${stats.players}`, inline: true },
@@ -384,10 +404,34 @@ module.exports = {
                         .setColor('#2ecc71');
 
                     const startupMsg = await pollChannel.send({
-                        content: `**Server Status**`,
-                        embeds: [startupEmbed]
+                        content: `<@&${config.roles.sessionPing}>`, // Fixed Ping
+                        embeds: [imageEmbed, textEmbed]
                     });
                     state.startupMessageId = startupMsg.id;
+
+                    // Setup Auto-Update Interval (15 Minutes)
+                    state.statsInterval = setInterval(async () => {
+                        try {
+                            const freshStats = await fetchServerStats();
+                            // Fetch the message to make sure it still exists
+                            const msg = await pollChannel.messages.fetch(startupMsg.id);
+                            if (msg) {
+                                // Recreate the text embed with new stats
+                                const updatedTextEmbed = new EmbedBuilder()
+                                    .setDescription(`A server startup has been hosted! The server is now open for all players to join. Please ensure you follow all server rules and enjoy the session. Join instantly by [clicking here](https://policeroleplay.community/join/chicagoRPC) or join by using code "chicagoRPC".`)
+                                    .addFields(
+                                        { name: '`Server Player Count:`', value: `${freshStats.players}`, inline: true },
+                                        { name: '`Server Queue:`', value: `${freshStats.queue}`, inline: true }
+                                    )
+                                    .setColor('#2ecc71');
+                                
+                                await msg.edit({ embeds: [imageEmbed, updatedTextEmbed] });
+                            }
+                        } catch (err) {
+                            console.error('Failed to update stats or message deleted:', err);
+                            clearStatsInterval(state);
+                        }
+                    }, 15 * 60 * 1000);
                 }
 
                 // Log generation
@@ -427,12 +471,27 @@ module.exports = {
             else if (selected === 'post_boost') {
                 const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
                 if (pollChannel) {
-                    const boostEmbed = new EmbedBuilder()
-                        .setTitle(`${config.emojis.crpc} Session is still active!`)
-                        .setDescription('The session is still ongoing. Join up!')
+                    // Boost Embeds (Dual Embeds)
+                    const imageEmbed = new EmbedBuilder()
+                        .setColor('#00ff00');
+                    // Reuse startup image for active session context
+                    if (config.images && config.images.startup) {
+                        imageEmbed.setImage(config.images.startup);
+                    }
+
+                    const textEmbed = new EmbedBuilder()
+                        .setDescription('The session is still ongoing, don’t miss out! Jump in and join the action now!')
                         .setColor('#00ff00');
                     
-                    const boostMsg = await pollChannel.send({ embeds: [boostEmbed] });
+                    const joinButton = new ButtonBuilder()
+                        .setLabel('Join Server')
+                        .setStyle(ButtonStyle.Link)
+                        .setURL('https://policeroleplay.community/join/chicagoRPC');
+
+                    const boostMsg = await pollChannel.send({ 
+                        embeds: [imageEmbed, textEmbed],
+                        components: [new ActionRowBuilder().addComponents(joinButton)]
+                    });
                     // Store ID for cleanup
                     state.boostMessageIds.push(boostMsg.id);
                 }
@@ -486,15 +545,19 @@ module.exports = {
                         } catch (e) { }
                     }
 
-                    // Send Shutdown Message with Image
-                    const ssdEmbed = new EmbedBuilder()
-                        .setImage(config.images.shutdown)
+                    // Send Shutdown Message (Dual Embeds)
+                    const imageEmbed = new EmbedBuilder()
+                        .setColor('#ff0000');
+                    if (config.images && config.images.shutdown) {
+                        imageEmbed.setImage(config.images.shutdown);
+                    }
+
+                    const textEmbed = new EmbedBuilder()
                         .setDescription(`The server has shutdown. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`)
                         .setColor('#ff0000');
 
                     const ssdMsg = await pollChannel.send({
-                        content: `**Server Status**`,
-                        embeds: [ssdEmbed]
+                        embeds: [imageEmbed, textEmbed]
                     });
                     
                     // Store Shutdown ID for next session start cleanup
@@ -518,6 +581,7 @@ module.exports = {
                 );
 
                 // Reset session state but preserve shutdown ID and panel info
+                clearStatsInterval(state);
                 state.status = 'IDLE';
                 state.voters.clear();
                 state.pollMessageId = null;
