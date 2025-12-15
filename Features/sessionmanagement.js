@@ -109,7 +109,7 @@ module.exports = {
         // Permission Check
         if (!hasAccess(interaction.member)) {
             return interaction.reply({ 
-                content: `You do not have permission to use this command. Required Role: <@&${config.roles.commandAccess}>`, 
+                content: `You do not have permission to use this command.`, 
                 ephemeral: true 
             });
         }
@@ -277,7 +277,7 @@ module.exports = {
             // Permission Check for Dropdowns
             if (!hasAccess(interaction.member)) {
                 return interaction.reply({ 
-                    content: `You do not have permission to use this menu. Required Role: <@&${config.roles.commandAccess}>`, 
+                    content: `You do not have permission to use this menu.`, 
                     ephemeral: true 
                 });
             }
@@ -527,7 +527,7 @@ module.exports = {
                             console.error('Failed to update stats or message deleted:', err);
                             clearStatsInterval(state);
                         }
-                    }, 15 * 60 * 1000);
+                    }, 5 * 60 * 1000);
                 }
 
                 // Log generation
