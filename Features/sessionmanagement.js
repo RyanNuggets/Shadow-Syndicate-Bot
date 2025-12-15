@@ -50,6 +50,35 @@ function addSessionLog(state, message) {
     return state.sessionLogs.join('\n');
 }
 
+// Helper to fetch server stats
+async function fetchServerStats() {
+    try {
+        const headers = { 'Server-Key': config.serverKey };
+        
+        const [playersRes, queueRes] = await Promise.all([
+            fetch('https://api.policeroleplay.community/v1/server/players', { headers }),
+            fetch('https://api.policeroleplay.community/v1/server/queue', { headers })
+        ]);
+
+        if (!playersRes.ok || !queueRes.ok) {
+            console.error('API Error:', playersRes.status, queueRes.status);
+            return { players: 'N/A', queue: 'N/A' };
+        }
+
+        const playersData = await playersRes.json();
+        const queueData = await queueRes.json();
+
+        // Determine count based on response type (Array vs Object)
+        const playerCount = Array.isArray(playersData) ? playersData.length : (playersData.length || 0);
+        const queueCount = Array.isArray(queueData) ? queueData.length : (queueData.length || 0);
+
+        return { players: playerCount, queue: queueCount };
+    } catch (error) {
+        console.error('Failed to fetch stats:', error);
+        return { players: 'Error', queue: 'Error' };
+    }
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('session')
@@ -96,10 +125,6 @@ module.exports = {
             // Store management panel details
             state.managementMessageId = response.id;
             state.managementChannelId = interaction.channelId;
-            
-            // Ensure status is idle if just opening panel (or preserve if recovering, but here we assume fresh start usually)
-            // If there was a previous state (like active session), this command spawns a NEW panel.
-            // Ideally, we should sync with current state, but for simplicity we assume this command controls the flow.
         }
     },
 
@@ -132,7 +157,7 @@ module.exports = {
                 const actionRow = new ActionRowBuilder().addComponents(newButton);
                 await interaction.message.edit({ components: [actionRow] });
 
-                // BUG FIX 1: Update Management Panel Vote Count
+                // Update Management Panel Vote Count
                 if (state.managementMessageId && state.managementChannelId) {
                     const manageChannel = interaction.guild.channels.cache.get(state.managementChannelId);
                     if (manageChannel) {
@@ -179,9 +204,18 @@ module.exports = {
                 state.status = 'POLL';
                 state.voters.clear();
 
-                // Send to Poll Channel
                 const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
                 if (pollChannel) {
+                    // BUG FIX: Delete leftover shutdown message from previous session if it exists
+                    if (state.shutdownMessageId) {
+                        try {
+                            const ssdMsg = await pollChannel.messages.fetch(state.shutdownMessageId);
+                            if (ssdMsg) await ssdMsg.delete();
+                        } catch (e) { }
+                        state.shutdownMessageId = null;
+                    }
+
+                    // Send to Poll Channel
                     const pollEmbed = new EmbedBuilder()
                         .setTitle(`${config.emojis.crpc} Session Poll`)
                         .setDescription(`A session poll was started by <@${state.hostId}>. Vote below to start the session. 10 votes required.`)
@@ -256,8 +290,15 @@ module.exports = {
                 // Send Shutdown Message
                 const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
                 if (pollChannel) {
+                    // Shutdown Embed with Image
+                    const ssdEmbed = new EmbedBuilder()
+                        .setImage(config.images.shutdown)
+                        .setDescription(`The server has shutdown. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`)
+                        .setColor('#ff0000');
+
                     const ssdMsg = await pollChannel.send({
-                        content: `**Server Status**\nThe server is now shutting down. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`
+                        content: `**Server Status**`,
+                        embeds: [ssdEmbed]
                     });
                     state.shutdownMessageId = ssdMsg.id; // Store for next session
                 }
@@ -278,8 +319,7 @@ module.exports = {
                         ])
                 );
 
-                // We do NOT delete the entire state here, we just reset session specific info
-                // This allows us to keep shutdownMessageId for the next session
+                // Reset session state
                 state.status = 'IDLE';
                 state.voters.clear();
                 state.pollMessageId = null;
@@ -293,10 +333,13 @@ module.exports = {
 
             // 4. START SESSION (From Poll or Direct)
             else if (selected === 'start_session') {
+                // Defer update first since API call might take a moment
+                await interaction.deferUpdate();
+
                 const wasPoll = state.status === 'POLL';
                 const voteCount = state.voters.size;
                 state.status = 'ACTIVE';
-                state.sessionLogs = []; // Reset logs for new session
+                state.sessionLogs = []; // Reset logs
                 
                 if (!wasPoll) {
                     state.hostId = interaction.user.id;
@@ -308,9 +351,12 @@ module.exports = {
                     ? `The session was started after a poll with ${voteCount} votes.` 
                     : `The session was started after a poll with 0 votes.`; 
 
+                // Fetch Stats
+                const stats = await fetchServerStats();
+
                 const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
                 if (pollChannel) {
-                    // BUG FIX 2: Delete previous shutdown message if it exists
+                    // Delete previous shutdown message if it exists
                     if (state.shutdownMessageId) {
                         try {
                             const ssdMsg = await pollChannel.messages.fetch(state.shutdownMessageId);
@@ -327,9 +373,19 @@ module.exports = {
                         } catch (e) { }
                     }
 
-                    // Send Startup Message and save ID
+                    // Send Startup Embed with Image and Stats
+                    const startupEmbed = new EmbedBuilder()
+                        .setImage(config.images.startup)
+                        .setDescription(`A server startup has been hosted! The server is now open for all players to join. Please ensure you follow all server rules and enjoy the session. Join instantly by [clicking here](https://policeroleplay.community/join/chicagoRPC) or join by using code "chicagoRPC".`)
+                        .addFields(
+                            { name: '`Server Player Count:`', value: `${stats.players}`, inline: true },
+                            { name: '`Server Queue:`', value: `${stats.queue}`, inline: true }
+                        )
+                        .setColor('#2ecc71');
+
                     const startupMsg = await pollChannel.send({
-                        content: `**Server Status**\nA server startup has just been hosted! The server is now open for all players to join. Please ensure you follow all server rules and enjoy the session. Join instantly by [clicking here](https://policeroleplay.community/join/LARPJ) or join by using code "LARPJ".`
+                        content: `**Server Status**`,
+                        embeds: [startupEmbed]
                     });
                     state.startupMessageId = startupMsg.id;
                 }
@@ -339,7 +395,6 @@ module.exports = {
                 if (wasPoll) {
                     addSessionLog(state, `Session was started by <@${state.hostId}> after a poll with ${voteCount} votes`);
                 } else {
-                    // Direct start log if needed (User prompt example showed log for direct start too)
                     addSessionLog(state, `Session was started by <@${state.hostId}> after a poll with 0 votes`);
                 }
 
@@ -364,7 +419,7 @@ module.exports = {
                         ])
                 );
 
-                await interaction.update({ embeds: [activeEmbed, logsEmbed], components: [row] });
+                await interaction.editReply({ embeds: [activeEmbed, logsEmbed], components: [row] });
                 await logToChannel(interaction.guild, 'Session Started', `Session started by <@${interaction.user.id}>. Mode: ${wasPoll ? 'Poll' : 'Direct'}.`, '#2ecc71');
             }
 
@@ -396,7 +451,6 @@ module.exports = {
                     .setDescription(state.sessionLogs.join('\n'))
                     .setColor('#2b2d31');
                 
-                // We use update here to refresh the logs
                 const row = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
                         .setCustomId('session_manage_menu')
@@ -424,7 +478,7 @@ module.exports = {
                             if (msg) await msg.delete();
                         } catch (e) { }
                     }
-                    // BUG FIX 3: Delete Boost Messages
+                    // Delete Boost Messages
                     for (const boostId of state.boostMessageIds) {
                         try {
                             const msg = await pollChannel.messages.fetch(boostId);
@@ -432,9 +486,15 @@ module.exports = {
                         } catch (e) { }
                     }
 
-                    // Send Shutdown Message
+                    // Send Shutdown Message with Image
+                    const ssdEmbed = new EmbedBuilder()
+                        .setImage(config.images.shutdown)
+                        .setDescription(`The server has shutdown. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`)
+                        .setColor('#ff0000');
+
                     const ssdMsg = await pollChannel.send({
-                        content: `**Server Status**\nThe server is now shutting down. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`
+                        content: `**Server Status**`,
+                        embeds: [ssdEmbed]
                     });
                     
                     // Store Shutdown ID for next session start cleanup
