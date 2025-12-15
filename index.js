@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Collection, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, REST, Routes, Events } = require('discord.js');
 const fs = require('node:fs');
 const path = require('node:path');
 const config = require('./config.json');
@@ -12,7 +12,7 @@ const client = new Client({
     ]
 });
 
-// Load the session management feature manually since specific structure was requested
+// Load the session management feature manually
 const sessionFeature = require('./Features/sessionmanagement.js');
 
 client.commands = new Collection();
@@ -20,7 +20,7 @@ client.commands = new Collection();
 client.commands.set(sessionFeature.data.name, sessionFeature);
 
 // When the client is ready
-client.once('ready', async () => {
+client.once(Events.ClientReady, async () => {
     console.log(`Logged in as ${client.user.tag}!`);
 
     // Register Slash Commands
@@ -29,9 +29,9 @@ client.once('ready', async () => {
     try {
         console.log('Started refreshing application (/) commands.');
 
-        // Only registering the one command requested
+        // FIX: Use client.user.id instead of config.clientId to prevent authorization errors
         await rest.put(
-            Routes.applicationGuildCommands(config.clientId, config.guildId),
+            Routes.applicationGuildCommands(client.user.id, config.guildId),
             { body: [sessionFeature.data.toJSON()] },
         );
 
@@ -42,7 +42,7 @@ client.once('ready', async () => {
 });
 
 // Interaction Handler
-client.on('interactionCreate', async interaction => {
+client.on(Events.InteractionCreate, async interaction => {
     try {
         // Handle Slash Commands
         if (interaction.isChatInputCommand()) {
@@ -52,8 +52,6 @@ client.on('interactionCreate', async interaction => {
         }
         // Handle Buttons and Select Menus (routed to sessionFeature)
         else if (interaction.isButton() || interaction.isStringSelectMenu()) {
-            // Check if this interaction belongs to our session system
-            // We route all relevant IDs to the feature handler
             const customId = interaction.customId;
             if (customId.startsWith('session_') || customId === 'poll_vote_btn') {
                 await sessionFeature.handleInteraction(interaction);
