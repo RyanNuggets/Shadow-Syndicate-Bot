@@ -10,7 +10,8 @@
     },
     "roles": {
         "pollPing": "1447706606614741113",
-        "voteReachedPing": "1447635544594186443"
+        "voteReachedPing": "1447635544594186443",
+        "sessionPing": "1447706606614741113"
     },
     "emojis": {
         "crpc": "<:CRPC:1448346865505665125>",
@@ -21,3 +22,4 @@
         "shutdown": "https://media.discordapp.net/attachments/1437715926215557180/1450163976162906174/crpc_banner2_4.png?ex=694189f2&is=69403872&hm=f11fa6277f9e224a642ccd2b9915738983e865a49691f8bf920467da294b2c2f&=&format=webp&quality=lossless"
     }
 }
+
