@@ -29,6 +29,11 @@ function getOrInitState(guildId) {
     return sessionState.get(guildId);
 }
 
+// Helper for permission checking
+function hasAccess(member) {
+    return member.roles.cache.has(config.roles.commandAccess);
+}
+
 // Helper for external logging
 async function logToChannel(guild, title, description, color) {
     const logChannelId = config.channels.actionLog;
@@ -101,39 +106,102 @@ module.exports = {
         ),
 
     async execute(interaction) {
+        // Permission Check
+        if (!hasAccess(interaction.member)) {
+            return interaction.reply({ 
+                content: `You do not have permission to use this command. Required Role: <@&${config.roles.commandAccess}>`, 
+                ephemeral: true 
+            });
+        }
+
         if (interaction.options.getSubcommand() === 'manage') {
             const state = getOrInitState(interaction.guildId);
 
-            const embed = new EmbedBuilder()
-                .setTitle(`${config.emojis.crpc} No Active Session`)
-                .setDescription('Start a session or create a poll by clicking the buttons below this message')
-                .setColor(EMBED_COLOR);
+            let embeds = [];
+            let components = [];
 
-            const row = new ActionRowBuilder()
-                .addComponents(
+            // Determine what to show based on current status
+            if (state.status === 'POLL') {
+                const manageEmbed = new EmbedBuilder()
+                    .setTitle(`${config.emojis.crpc} Session Poll in Progress`)
+                    .setDescription(`A session poll was started by <@${state.hostId}> <t:${state.startTime}:R>.`)
+                    .addFields(
+                        { name: '**Votes**', value: `${state.voters.size}`, inline: true },
+                        { name: '**Votes Required**', value: '10', inline: true }
+                    )
+                    .setColor(EMBED_COLOR);
+                embeds.push(manageEmbed);
+
+                const row = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
                         .setCustomId('session_manage_menu')
                         .setPlaceholder('Select an option')
                         .addOptions([
-                            {
-                                label: 'Start Session',
-                                value: 'start_session',
-                                description: 'Start the session immediately',
-                                emoji: '🚀'
-                            },
-                            {
-                                label: 'Create Poll',
-                                value: 'create_poll',
-                                description: 'Start a vote for a session',
-                                emoji: '📊'
-                            }
+                            { label: 'Start Session', value: 'start_session', emoji: '🚀' },
+                            { label: 'Cancel Poll', value: 'cancel_poll', emoji: '❌' },
+                            { label: 'See Voters', value: 'see_voters', emoji: '👀' }
                         ])
                 );
+                components.push(row);
 
-            await interaction.reply({ embeds: [embed], components: [row] });
+            } else if (state.status === 'ACTIVE') {
+                const activeEmbed = new EmbedBuilder()
+                    .setTitle(`${config.emojis.crpc} Active Session`)
+                    .setDescription(`The session was started by <@${state.hostId}> <t:${state.startTime}:R>. ${state.startReason}`)
+                    .setColor(EMBED_COLOR);
+
+                const logsEmbed = new EmbedBuilder()
+                    .setTitle(`${config.emojis.crpc} Session Logs`)
+                    .setDescription(state.sessionLogs.length > 0 ? state.sessionLogs.join('\n') : 'No logs yet.')
+                    .setColor(EMBED_COLOR);
+                embeds.push(activeEmbed, logsEmbed);
+
+                const row = new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder()
+                        .setCustomId('session_manage_menu')
+                        .setPlaceholder('Select an option')
+                        .addOptions([
+                            { label: 'Shutdown Session', value: 'shutdown_session', emoji: '🛑' },
+                            { label: 'Post Boost Message', value: 'post_boost', emoji: '🚀' }
+                        ])
+                );
+                components.push(row);
+
+            } else {
+                // IDLE Status
+                const embed = new EmbedBuilder()
+                    .setTitle(`${config.emojis.crpc} No Active Session`)
+                    .setDescription('Start a session or create a poll by clicking the buttons below this message')
+                    .setColor(EMBED_COLOR);
+                embeds.push(embed);
+
+                const row = new ActionRowBuilder()
+                    .addComponents(
+                        new StringSelectMenuBuilder()
+                            .setCustomId('session_manage_menu')
+                            .setPlaceholder('Select an option')
+                            .addOptions([
+                                {
+                                    label: 'Start Session',
+                                    value: 'start_session',
+                                    description: 'Start the session immediately',
+                                    emoji: '🚀'
+                                },
+                                {
+                                    label: 'Create Poll',
+                                    value: 'create_poll',
+                                    description: 'Start a vote for a session',
+                                    emoji: '📊'
+                                }
+                            ])
+                    );
+                components.push(row);
+            }
+
+            await interaction.reply({ embeds: embeds, components: components });
             const message = await interaction.fetchReply();
             
-            // Store management panel details
+            // Store management panel details to allow updates later
             state.managementMessageId = message.id;
             state.managementChannelId = interaction.channelId;
         }
@@ -175,7 +243,7 @@ module.exports = {
                         try {
                             const manageMsg = await manageChannel.messages.fetch(state.managementMessageId);
                             if (manageMsg) {
-                                // Reconstruct the Embed
+                                // Reconstruct the Embed based on current state (POLL)
                                 const manageEmbed = new EmbedBuilder()
                                     .setTitle(`${config.emojis.crpc} Session Poll in Progress`)
                                     .setDescription(`A session poll was started by <@${state.hostId}> <t:${state.startTime}:R>.`)
@@ -206,6 +274,14 @@ module.exports = {
 
         // --- DROPDOWN HANDLING ---
         if (interaction.isStringSelectMenu() && interaction.customId === 'session_manage_menu') {
+            // Permission Check for Dropdowns
+            if (!hasAccess(interaction.member)) {
+                return interaction.reply({ 
+                    content: `You do not have permission to use this menu. Required Role: <@&${config.roles.commandAccess}>`, 
+                    ephemeral: true 
+                });
+            }
+
             const selected = interaction.values[0];
 
             // 1. CREATE POLL
