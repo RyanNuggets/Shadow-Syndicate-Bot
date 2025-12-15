@@ -1,4 +1,17 @@
 {
-  "guildId": "1437715430545428553",
-  "DISCORD_CLIENT_ID": "1450144688832118946",
+    "token": "YOUR_BOT_TOKEN_HERE",
+    "clientId": "1450144688832118946",
+    "guildId": "1437715430545428553",
+    "channels": {
+        "pollAnnouncement": "1447635662147813467",
+        "adminNotification": "1450149498432131082"
+    },
+    "roles": {
+        "pollPing": "1447706606614741113",
+        "voteReachedPing": "1447635544594186443"
+    },
+    "emojis": {
+        "crpc": "<:CRPC:1448346865505665125>",
+        "arrow": "<:rightarrow:1449034297767100531>"
+    }
 }
