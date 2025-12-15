@@ -240,7 +240,8 @@ module.exports = {
                     const pollMsg = await pollChannel.send({
                         content: `<@&${config.roles.pollPing}> @here`,
                         embeds: [pollEmbed],
-                        components: [new ActionRowBuilder().addComponents(voteBtn)]
+                        components: [new ActionRowBuilder().addComponents(voteBtn)],
+                        allowedMentions: { parse: ['roles', 'everyone'] }
                     });
 
                     state.pollMessageId = pollMsg.id;
@@ -417,7 +418,8 @@ module.exports = {
 
                     const startupMsg = await pollChannel.send({
                         content: `<@&${config.roles.sessionPing}> @here`,
-                        embeds: embedsToSend
+                        embeds: embedsToSend,
+                        allowedMentions: { parse: ['roles', 'everyone'] }
                     });
                     state.startupMessageId = startupMsg.id;
 
@@ -500,8 +502,10 @@ module.exports = {
                         .setURL('https://policeroleplay.community/join/chicagoRPC');
 
                     const boostMsg = await pollChannel.send({ 
+                        content: `<@&${config.roles.sessionPing}> @here`,
                         embeds: [textEmbed],
-                        components: [new ActionRowBuilder().addComponents(joinButton)]
+                        components: [new ActionRowBuilder().addComponents(joinButton)],
+                        allowedMentions: { parse: ['roles', 'everyone'] }
                     });
                     // Store ID for cleanup
                     state.boostMessageIds.push(boostMsg.id);
