@@ -4,15 +4,15 @@
     "guildId": "1131728085650243604",
     "serverKey": "bqeLquAxxhwJkFkXflDL-VAAmjUPXguBrZcQJoyTUVhZTgrfysczhbGEwWJEl",
     "channels": {
-        "pollAnnouncement": "1450157004596449414",
-        "adminNotification": "1450157016809996479",
-        "actionLog": "1450158615573958857"
+        "pollAnnouncement": "1447635662147813467",
+        "adminNotification": "1450149498432131082",
+        "actionLog": "1450149498432131082"
     },
     "roles": {
         "pollPing": "1447706606614741113",
         "voteReachedPing": "1447635544594186443",
         "sessionPing": "1447706606614741113",
-        "commandAccess": "1437715652537225217"
+        "commandAccess": "1450197483845193790"
     },
     "emojis": {
         "crpc": "<:CRPC:1448346865505665125>",
