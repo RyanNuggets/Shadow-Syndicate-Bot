@@ -15,5 +15,9 @@
     "emojis": {
         "crpc": "<:CRPC:1448346865505665125>",
         "arrow": "<:rightarrow:1449034297767100531>"
+    },
+    "images": {
+        "startup": "https://media.discordapp.net/attachments/1437715926215557180/1450163340189110362/crpc_banner2_3.png?ex=6941895b&is=694037db&hm=8ff8882d5d20ee730669a571b073e4374e65745de81dfdb60e814b36ee8914ca&=&format=webp&quality=lossless",
+        "shutdown": "https://media.discordapp.net/attachments/1437715926215557180/1450163976162906174/crpc_banner2_4.png?ex=694189f2&is=69403872&hm=f11fa6277f9e224a642ccd2b9915738983e865a49691f8bf920467da294b2c2f&=&format=webp&quality=lossless"
     }
 }
