@@ -238,7 +238,7 @@ module.exports = {
                         .setStyle(ButtonStyle.Primary);
 
                     const pollMsg = await pollChannel.send({
-                        content: `<@&${config.roles.pollPing}>`,
+                        content: `<@&${config.roles.pollPing}> @here`,
                         embeds: [pollEmbed],
                         components: [new ActionRowBuilder().addComponents(voteBtn)]
                     });
@@ -301,19 +301,24 @@ module.exports = {
                 // Send Shutdown Message
                 const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
                 if (pollChannel) {
-                    // Shutdown Embeds (Dual Embeds for Large Image)
-                    const imageEmbed = new EmbedBuilder()
-                        .setColor(EMBED_COLOR);
+                    // Construct Embeds Array (Dual Embeds for Large Image)
+                    const embedsToSend = [];
+
                     if (config.images && config.images.shutdown) {
-                        imageEmbed.setImage(config.images.shutdown);
+                        const imageEmbed = new EmbedBuilder()
+                            .setColor(EMBED_COLOR)
+                            .setImage(config.images.shutdown);
+                        embedsToSend.push(imageEmbed);
                     }
 
                     const textEmbed = new EmbedBuilder()
                         .setDescription(`The server has shutdown. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`)
                         .setColor(EMBED_COLOR);
                     
+                    embedsToSend.push(textEmbed);
+
                     const ssdMsg = await pollChannel.send({
-                        embeds: [imageEmbed, textEmbed]
+                        embeds: embedsToSend
                     });
                     state.shutdownMessageId = ssdMsg.id;
                 }
@@ -390,11 +395,14 @@ module.exports = {
                         } catch (e) { }
                     }
 
-                    // Send Startup Embeds (Dual Embeds for Large Image)
-                    const imageEmbed = new EmbedBuilder()
-                        .setColor(EMBED_COLOR);
+                    // Construct Embeds (Dual Embeds for Large Image)
+                    const embedsToSend = [];
+
                     if (config.images && config.images.startup) {
-                        imageEmbed.setImage(config.images.startup);
+                        const imageEmbed = new EmbedBuilder()
+                            .setColor(EMBED_COLOR)
+                            .setImage(config.images.startup);
+                        embedsToSend.push(imageEmbed);
                     }
 
                     const textEmbed = new EmbedBuilder()
@@ -405,9 +413,11 @@ module.exports = {
                         )
                         .setColor(EMBED_COLOR);
 
+                    embedsToSend.push(textEmbed);
+
                     const startupMsg = await pollChannel.send({
-                        content: `<@&${config.roles.sessionPing}>`,
-                        embeds: [imageEmbed, textEmbed]
+                        content: `<@&${config.roles.sessionPing}> @here`,
+                        embeds: embedsToSend
                     });
                     state.startupMessageId = startupMsg.id;
 
@@ -418,7 +428,12 @@ module.exports = {
                             // Fetch the message to make sure it still exists
                             const msg = await pollChannel.messages.fetch(startupMsg.id);
                             if (msg) {
-                                // Recreate the text embed with new stats
+                                // Recreate the embeds array
+                                const updateEmbeds = [];
+                                if (config.images && config.images.startup) {
+                                    updateEmbeds.push(new EmbedBuilder().setColor(EMBED_COLOR).setImage(config.images.startup));
+                                }
+
                                 const updatedTextEmbed = new EmbedBuilder()
                                     .setDescription(`A server startup has been hosted! The server is now open for all players to join. Please ensure you follow all server rules and enjoy the session. Join instantly by [clicking here](https://policeroleplay.community/join/chicagoRPC) or join by using code "chicagoRPC".`)
                                     .addFields(
@@ -426,8 +441,9 @@ module.exports = {
                                         { name: '`Server Queue:`', value: `${freshStats.queue}`, inline: true }
                                     )
                                     .setColor(EMBED_COLOR);
+                                updateEmbeds.push(updatedTextEmbed);
                                 
-                                await msg.edit({ embeds: [imageEmbed, updatedTextEmbed] });
+                                await msg.edit({ embeds: updateEmbeds });
                             }
                         } catch (err) {
                             console.error('Failed to update stats or message deleted:', err);
@@ -540,19 +556,24 @@ module.exports = {
                         } catch (e) { }
                     }
 
-                    // Send Shutdown Message (Dual Embeds for Large Image)
-                    const imageEmbed = new EmbedBuilder()
-                        .setColor(EMBED_COLOR);
+                    // Construct Embeds (Dual Embeds for Large Image)
+                    const embedsToSend = [];
+
                     if (config.images && config.images.shutdown) {
-                        imageEmbed.setImage(config.images.shutdown);
+                        const imageEmbed = new EmbedBuilder()
+                            .setColor(EMBED_COLOR)
+                            .setImage(config.images.shutdown);
+                        embedsToSend.push(imageEmbed);
                     }
 
                     const textEmbed = new EmbedBuilder()
                         .setDescription(`The server has shutdown. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`)
                         .setColor(EMBED_COLOR);
 
+                    embedsToSend.push(textEmbed);
+
                     const ssdMsg = await pollChannel.send({
-                        embeds: [imageEmbed, textEmbed]
+                        embeds: embedsToSend
                     });
                     
                     // Store Shutdown ID for next session start cleanup
