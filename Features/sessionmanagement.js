@@ -5,6 +5,8 @@ const config = require('../config.json');
 // Structure: guildId -> { voters: Set(), pollMessageId: string, startupMessageId: string, shutdownMessageId: string, boostMessageIds: [], sessionLogs: [], managementMessageId: string, managementChannelId: string, hostId: string, startTime: number, status: string, startReason: string, statsInterval: IntervalID }
 const sessionState = new Map();
 
+const EMBED_COLOR = '#41b6e6';
+
 // Helper to get or initialize state
 function getOrInitState(guildId) {
     if (!sessionState.has(guildId)) {
@@ -105,7 +107,7 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setTitle(`${config.emojis.crpc} No Active Session`)
                 .setDescription('Start a session or create a poll by clicking the buttons below this message')
-                .setColor('#2b2d31');
+                .setColor(EMBED_COLOR);
 
             const row = new ActionRowBuilder()
                 .addComponents(
@@ -181,7 +183,7 @@ module.exports = {
                                         { name: '**Votes**', value: `${state.voters.size}`, inline: true },
                                         { name: '**Votes Required**', value: '10', inline: true }
                                     )
-                                    .setColor('#e67e22');
+                                    .setColor(EMBED_COLOR);
                                 
                                 await manageMsg.edit({ embeds: [manageEmbed] });
                             }
@@ -197,7 +199,7 @@ module.exports = {
                             content: `<@&${config.roles.voteReachedPing}> The session poll has reached 10 votes!`
                         });
                     }
-                    await logToChannel(interaction.guild, 'Poll Votes Reached', `The poll reached 10 votes.`, '#e67e22');
+                    await logToChannel(interaction.guild, 'Poll Votes Reached', `The poll reached 10 votes.`, EMBED_COLOR);
                 }
             }
         }
@@ -228,7 +230,7 @@ module.exports = {
                     const pollEmbed = new EmbedBuilder()
                         .setTitle(`${config.emojis.crpc} Session Poll`)
                         .setDescription(`A session poll was started by <@${state.hostId}>. Vote below to start the session. 10 votes required.`)
-                        .setColor('#0099ff');
+                        .setColor(EMBED_COLOR);
                     
                     const voteBtn = new ButtonBuilder()
                         .setCustomId('poll_vote_btn')
@@ -252,7 +254,7 @@ module.exports = {
                         { name: '**Votes**', value: `${state.voters.size}`, inline: true },
                         { name: '**Votes Required**', value: '10', inline: true }
                     )
-                    .setColor('#e67e22');
+                    .setColor(EMBED_COLOR);
 
                 const row = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
@@ -266,7 +268,7 @@ module.exports = {
                 );
 
                 await interaction.update({ embeds: [manageEmbed], components: [row] });
-                await logToChannel(interaction.guild, 'Poll Created', `Poll started by <@${state.hostId}>`, '#0099ff');
+                await logToChannel(interaction.guild, 'Poll Created', `Poll started by <@${state.hostId}>`, EMBED_COLOR);
             }
 
             // 2. SEE VOTERS
@@ -278,7 +280,7 @@ module.exports = {
                 const embed = new EmbedBuilder()
                     .setTitle(`${config.emojis.crpc} ${state.voters.size} Voter(s)`)
                     .setDescription(voterList)
-                    .setColor('#2b2d31');
+                    .setColor(EMBED_COLOR);
 
                 await interaction.reply({ embeds: [embed], ephemeral: true });
             }
@@ -299,16 +301,16 @@ module.exports = {
                 // Send Shutdown Message
                 const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
                 if (pollChannel) {
-                    // Shutdown Embeds (Dual Embeds)
+                    // Shutdown Embeds (Dual Embeds for Large Image)
                     const imageEmbed = new EmbedBuilder()
-                        .setColor('#ff0000');
+                        .setColor(EMBED_COLOR);
                     if (config.images && config.images.shutdown) {
                         imageEmbed.setImage(config.images.shutdown);
                     }
 
                     const textEmbed = new EmbedBuilder()
                         .setDescription(`The server has shutdown. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`)
-                        .setColor('#ff0000');
+                        .setColor(EMBED_COLOR);
                     
                     const ssdMsg = await pollChannel.send({
                         embeds: [imageEmbed, textEmbed]
@@ -320,7 +322,7 @@ module.exports = {
                 const resetEmbed = new EmbedBuilder()
                     .setTitle(`${config.emojis.crpc} No Active Session`)
                     .setDescription('Start a session or create a poll by clicking the buttons below this message')
-                    .setColor('#2b2d31');
+                    .setColor(EMBED_COLOR);
 
                 const row = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
@@ -342,7 +344,7 @@ module.exports = {
                 state.sessionLogs = [];
                 
                 await interaction.update({ embeds: [resetEmbed], components: [row] });
-                await logToChannel(interaction.guild, 'Poll Cancelled', `Poll cancelled by <@${interaction.user.id}>`, '#ff0000');
+                await logToChannel(interaction.guild, 'Poll Cancelled', `Poll cancelled by <@${interaction.user.id}>`, EMBED_COLOR);
             }
 
             // 4. START SESSION (From Poll or Direct)
@@ -388,9 +390,9 @@ module.exports = {
                         } catch (e) { }
                     }
 
-                    // Send Startup Embeds (Dual Embeds)
+                    // Send Startup Embeds (Dual Embeds for Large Image)
                     const imageEmbed = new EmbedBuilder()
-                        .setColor('#2ecc71');
+                        .setColor(EMBED_COLOR);
                     if (config.images && config.images.startup) {
                         imageEmbed.setImage(config.images.startup);
                     }
@@ -401,10 +403,10 @@ module.exports = {
                             { name: '`Server Player Count:`', value: `${stats.players}`, inline: true },
                             { name: '`Server Queue:`', value: `${stats.queue}`, inline: true }
                         )
-                        .setColor('#2ecc71');
+                        .setColor(EMBED_COLOR);
 
                     const startupMsg = await pollChannel.send({
-                        content: `<@&${config.roles.sessionPing}>`, // Fixed Ping
+                        content: `<@&${config.roles.sessionPing}>`,
                         embeds: [imageEmbed, textEmbed]
                     });
                     state.startupMessageId = startupMsg.id;
@@ -423,7 +425,7 @@ module.exports = {
                                         { name: '`Server Player Count:`', value: `${freshStats.players}`, inline: true },
                                         { name: '`Server Queue:`', value: `${freshStats.queue}`, inline: true }
                                     )
-                                    .setColor('#2ecc71');
+                                    .setColor(EMBED_COLOR);
                                 
                                 await msg.edit({ embeds: [imageEmbed, updatedTextEmbed] });
                             }
@@ -446,12 +448,12 @@ module.exports = {
                 const activeEmbed = new EmbedBuilder()
                     .setTitle(`${config.emojis.crpc} Active Session`)
                     .setDescription(`The session was started by <@${state.hostId}> <t:${state.startTime}:R>. ${state.startReason}`)
-                    .setColor('#2ecc71');
+                    .setColor(EMBED_COLOR);
 
                 const logsEmbed = new EmbedBuilder()
                     .setTitle(`${config.emojis.crpc} Session Logs`)
                     .setDescription(state.sessionLogs.join('\n'))
-                    .setColor('#2b2d31');
+                    .setColor(EMBED_COLOR);
 
                 const row = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
@@ -464,24 +466,17 @@ module.exports = {
                 );
 
                 await interaction.editReply({ embeds: [activeEmbed, logsEmbed], components: [row] });
-                await logToChannel(interaction.guild, 'Session Started', `Session started by <@${interaction.user.id}>. Mode: ${wasPoll ? 'Poll' : 'Direct'}.`, '#2ecc71');
+                await logToChannel(interaction.guild, 'Session Started', `Session started by <@${interaction.user.id}>. Mode: ${wasPoll ? 'Poll' : 'Direct'}.`, EMBED_COLOR);
             }
 
             // 5. POST BOOST MESSAGE
             else if (selected === 'post_boost') {
                 const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
                 if (pollChannel) {
-                    // Boost Embeds (Dual Embeds)
-                    const imageEmbed = new EmbedBuilder()
-                        .setColor('#00ff00');
-                    // Reuse startup image for active session context
-                    if (config.images && config.images.startup) {
-                        imageEmbed.setImage(config.images.startup);
-                    }
-
+                    // Boost Embed (Single Embed, No Image)
                     const textEmbed = new EmbedBuilder()
                         .setDescription('The session is still ongoing, don’t miss out! Jump in and join the action now!')
-                        .setColor('#00ff00');
+                        .setColor(EMBED_COLOR);
                     
                     const joinButton = new ButtonBuilder()
                         .setLabel('Join Server')
@@ -489,7 +484,7 @@ module.exports = {
                         .setURL('https://policeroleplay.community/join/chicagoRPC');
 
                     const boostMsg = await pollChannel.send({ 
-                        embeds: [imageEmbed, textEmbed],
+                        embeds: [textEmbed],
                         components: [new ActionRowBuilder().addComponents(joinButton)]
                     });
                     // Store ID for cleanup
@@ -503,12 +498,12 @@ module.exports = {
                 const activeEmbed = new EmbedBuilder()
                     .setTitle(`${config.emojis.crpc} Active Session`)
                     .setDescription(`The session was started by <@${state.hostId}> <t:${state.startTime}:R>. ${state.startReason}`)
-                    .setColor('#2ecc71');
+                    .setColor(EMBED_COLOR);
 
                 const logsEmbed = new EmbedBuilder()
                     .setTitle(`${config.emojis.crpc} Session Logs`)
                     .setDescription(state.sessionLogs.join('\n'))
-                    .setColor('#2b2d31');
+                    .setColor(EMBED_COLOR);
                 
                 const row = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
@@ -521,7 +516,7 @@ module.exports = {
                 );
 
                 await interaction.update({ embeds: [activeEmbed, logsEmbed], components: [row] });
-                await logToChannel(interaction.guild, 'Boost Posted', `Boost message posted by <@${interaction.user.id}>.`, '#00ff00');
+                await logToChannel(interaction.guild, 'Boost Posted', `Boost message posted by <@${interaction.user.id}>.`, EMBED_COLOR);
             }
 
             // 6. SHUTDOWN SESSION
@@ -545,16 +540,16 @@ module.exports = {
                         } catch (e) { }
                     }
 
-                    // Send Shutdown Message (Dual Embeds)
+                    // Send Shutdown Message (Dual Embeds for Large Image)
                     const imageEmbed = new EmbedBuilder()
-                        .setColor('#ff0000');
+                        .setColor(EMBED_COLOR);
                     if (config.images && config.images.shutdown) {
                         imageEmbed.setImage(config.images.shutdown);
                     }
 
                     const textEmbed = new EmbedBuilder()
                         .setDescription(`The server has shutdown. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`)
-                        .setColor('#ff0000');
+                        .setColor(EMBED_COLOR);
 
                     const ssdMsg = await pollChannel.send({
                         embeds: [imageEmbed, textEmbed]
@@ -568,7 +563,7 @@ module.exports = {
                 const resetEmbed = new EmbedBuilder()
                     .setTitle(`${config.emojis.crpc} No Active Session`)
                     .setDescription('Start a session or create a poll by clicking the buttons below this message')
-                    .setColor('#2b2d31');
+                    .setColor(EMBED_COLOR);
 
                 const row = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
@@ -591,7 +586,7 @@ module.exports = {
                 // state.shutdownMessageId is preserved
 
                 await interaction.update({ embeds: [resetEmbed], components: [row] });
-                await logToChannel(interaction.guild, 'Session Shutdown', `Session shutdown by <@${interaction.user.id}>.`, '#ff0000');
+                await logToChannel(interaction.guild, 'Session Shutdown', `Session shutdown by <@${interaction.user.id}>.`, EMBED_COLOR);
             }
         }
     }
