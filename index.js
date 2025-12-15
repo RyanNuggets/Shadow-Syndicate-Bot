@@ -1,67 +1,57 @@
-// index.js
-const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const { Client, Collection, GatewayIntentBits } = require('discord.js');
 
-// Load configuration
-const configPath = path.join(__dirname, 'config.json');
-let config;
-try {
-    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-} catch (error) {
-    console.error("FATAL ERROR: Could not load config.json. Please ensure the file exists and is valid JSON.", error);
+// Read token from environment variable
+const token = process.env.DISCORD_TOKEN;
+
+if (!token) {
+    console.error('ERROR: DISCORD_TOKEN is not set in your environment variables.');
     process.exit(1);
 }
 
-// Check for required environment variable
-if (!process.env.DISCORD_TOKEN) {
-    console.error("FATAL ERROR: DISCORD_TOKEN environment variable is not set.");
-    process.exit(1);
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+// Collection for commands
+client.commands = new Collection();
+
+// Load commands from /Features folder
+const commandsPath = path.join(__dirname, 'Features');
+const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+
+for (const file of commandFiles) {
+    const filePath = path.join(commandsPath, file);
+    const command = require(filePath);
+    if ('data' in command && 'execute' in command) {
+        client.commands.set(command.data.name, command);
+    } else {
+        console.log(`[WARNING] The command at ${filePath} is missing "data" or "execute".`);
+    }
 }
 
-// Initialize Discord Client
-const client = new Client({ 
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ] 
-});
+// Interaction handling
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
 
-// --- Feature Modules ---
-const timestampModule = require('./Features/timestamp');
-const promotionInfractionModule = require('./Features/promotion-infraction');
-const logArrestModule = require('./Features/logarrest');
-const availableCallsignsModule = require('./Features/availablecallsigns'); 
-const autoroleModule = require('./Features/autorole'); 
-const blsExamModule = require('./Features/blsexam'); 
-const rankModule = require('./Features/rank'); 
-const qotdModule = require('./Features/qotd'); // <-- QOTD Module
+    const command = client.commands.get(interaction.commandName);
 
-client.once('clientReady', async () => {
-    console.log(`Bot logged in as ${client.user.tag}!`);
+    if (!command) return;
 
-    // --- Register Slash Commands (These must be awaited after client is ready) ---
     try {
-        await timestampModule.registerTimestampCommand(client, config);
-        await promotionInfractionModule.registerPromotionInfractionCommand(client, config);
-        await logArrestModule.registerLogArrestCommand(client, config);
-        await availableCallsignsModule.registerAvailableCallsignsCommand(client, config);
-        await autoroleModule.registerAutoRoleCommand(client, config);
-        await rankModule.registerRankCommand(client, config);
-        
-        await qotdModule.registerQotdHandlers(client, config); // <-- Registers QOTD + QOTDList
-
-        console.log("✅ All feature modules initialized successfully.");
-    } catch (err) {
-        console.error("❌ Error registering commands/handlers:", err);
+        await command.execute(interaction);
+    } catch (error) {
+        console.error(error);
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp({ content: 'There was an error executing this command!', ephemeral: true });
+        } else {
+            await interaction.reply({ content: 'There was an error executing this command!', ephemeral: true });
+        }
     }
 });
 
-// 🔑 CRITICAL FIX: Register event handlers *before* client.login
-// This ensures the client.once('ready', ...) listener inside blsexam.js is called
-// when the client connects, allowing the start button to post.
-blsExamModule.registerExamHandlers(client, config);
+// Login
+client.once('ready', () => {
+    console.log(`Logged in as ${client.user.tag}!`);
+});
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(token);
