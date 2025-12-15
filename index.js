@@ -1,57 +1,72 @@
-const fs = require('fs');
-const path = require('path');
-const { Client, Collection, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, REST, Routes } = require('discord.js');
+const fs = require('node:fs');
+const path = require('node:path');
+const config = require('./config.json');
 
-// Read token from environment variable
-const token = process.env.DISCORD_TOKEN;
+// Initialize Client with necessary intents
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ]
+});
 
-if (!token) {
-    console.error('ERROR: DISCORD_TOKEN is not set in your environment variables.');
-    process.exit(1);
-}
+// Load the session management feature manually since specific structure was requested
+const sessionFeature = require('./Features/sessionmanagement.js');
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-// Collection for commands
 client.commands = new Collection();
+// Register the session command
+client.commands.set(sessionFeature.data.name, sessionFeature);
 
-// Load commands from /Features folder
-const commandsPath = path.join(__dirname, 'Features');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+// When the client is ready
+client.once('ready', async () => {
+    console.log(`Logged in as ${client.user.tag}!`);
 
-for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const command = require(filePath);
-    if ('data' in command && 'execute' in command) {
-        client.commands.set(command.data.name, command);
-    } else {
-        console.log(`[WARNING] The command at ${filePath} is missing "data" or "execute".`);
-    }
-}
-
-// Interaction handling
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-
-    const command = client.commands.get(interaction.commandName);
-
-    if (!command) return;
+    // Register Slash Commands
+    const rest = new REST({ version: '10' }).setToken(config.token);
 
     try {
-        await command.execute(interaction);
+        console.log('Started refreshing application (/) commands.');
+
+        // Only registering the one command requested
+        await rest.put(
+            Routes.applicationGuildCommands(config.clientId, config.guildId),
+            { body: [sessionFeature.data.toJSON()] },
+        );
+
+        console.log('Successfully reloaded application (/) commands.');
+    } catch (error) {
+        console.error(error);
+    }
+});
+
+// Interaction Handler
+client.on('interactionCreate', async interaction => {
+    try {
+        // Handle Slash Commands
+        if (interaction.isChatInputCommand()) {
+            const command = client.commands.get(interaction.commandName);
+            if (!command) return;
+            await command.execute(interaction);
+        }
+        // Handle Buttons and Select Menus (routed to sessionFeature)
+        else if (interaction.isButton() || interaction.isStringSelectMenu()) {
+            // Check if this interaction belongs to our session system
+            // We route all relevant IDs to the feature handler
+            const customId = interaction.customId;
+            if (customId.startsWith('session_') || customId === 'poll_vote_btn') {
+                await sessionFeature.handleInteraction(interaction);
+            }
+        }
     } catch (error) {
         console.error(error);
         if (interaction.replied || interaction.deferred) {
-            await interaction.followUp({ content: 'There was an error executing this command!', ephemeral: true });
+            await interaction.followUp({ content: 'There was an error while executing this command!', ephemeral: true });
         } else {
-            await interaction.reply({ content: 'There was an error executing this command!', ephemeral: true });
+            await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
         }
     }
 });
 
-// Login
-client.once('ready', () => {
-    console.log(`Logged in as ${client.user.tag}!`);
-});
-
-client.login(token);
+client.login(config.token);
