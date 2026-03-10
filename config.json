@@ -3,23 +3,23 @@
   "channels": {
     "sessionAnnouncement": "1472984863110860993",
     "actionLog": "1481003383795093595",
-    "queueNotification": "1472984863110860993",
+    "queueNotification": "1481073124676993216",
     "sessionEndLog": "1481003383795093595"
   },
   "roles": {
-    "commandAccess": "1456262798190448787",
-    "sessionSlotManager": "1456262798190448787",
-    "sessionPing": "1456262798190448787"
+    "commandAccess": "1456262856403321056",
+    "sessionSlotManager": "1456262856403321056",
+    "sessionPing": "1477967888424898660"
   },
   "reactions": {
     "join": "✅",
     "queue": "📋"
   },
   "emojis": {
-    "session": "✅",
-    "log": "✅",
-    "boost": "✅",
-    "full": "✅",
-    "queue": "✅"
+    "session": "<:shadow_syndicate:1473327993589076029>",
+    "log": "<:right_arrow:1481073591477997699>",
+    "boost": "<:right_arrow:1481073591477997699>",
+    "full": "<:right_arrow:1481073591477997699>",
+    "queue": "<:right_arrow:1481073591477997699>"
   }
 }
