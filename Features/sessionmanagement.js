@@ -1,671 +1,581 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
+const {
+    SlashCommandBuilder,
+    EmbedBuilder,
+    ActionRowBuilder,
+    StringSelectMenuBuilder,
+    UserSelectMenuBuilder,
+    ComponentType
+} = require('discord.js');
+
 const config = require('../config.json');
 
-// In-memory state storage. 
-// Structure: guildId -> { voters: Set(), pollMessageId: string, startupMessageId: string, shutdownMessageId: string, boostMessageIds: [], sessionLogs: [], managementMessageId: string, managementChannelId: string, hostId: string, startTime: number, status: string, startReason: string, statsInterval: IntervalID }
 const sessionState = new Map();
+const EMBED_COLOR = '#111111';
+const JOIN_EMOJI = '✅';
+const MAX_MEMBERS = 4;
 
-const EMBED_COLOR = '#41b6e6';
-
-// Helper to get or initialize state
 function getOrInitState(guildId) {
     if (!sessionState.has(guildId)) {
         sessionState.set(guildId, {
-            voters: new Set(),
-            pollMessageId: null,
-            startupMessageId: null,
-            shutdownMessageId: null,
-            boostMessageIds: [],
-            sessionLogs: [],
+            sessionMessageId: null,
+            sessionChannelId: null,
             managementMessageId: null,
             managementChannelId: null,
             hostId: null,
             startTime: null,
-            status: 'IDLE',
-            startReason: '',
-            statsInterval: null
+            status: 'IDLE', // IDLE | SIGNUPS | ACTIVE
+            joinedUsers: new Set(),
+            sessionLogs: [],
+            started: false
         });
     }
     return sessionState.get(guildId);
 }
 
-// Helper for permission checking
-function hasAccess(member) {
+function hasCommandAccess(member) {
     return member.roles.cache.has(config.roles.commandAccess);
 }
 
-// Helper for external logging
-async function logToChannel(guild, title, description, color) {
+function hasSlotAccess(member) {
+    return (
+        member.roles.cache.has(config.roles.commandAccess) ||
+        member.roles.cache.has(config.roles.sessionSlotManager)
+    );
+}
+
+async function logToChannel(guild, title, description, color = EMBED_COLOR) {
     const logChannelId = config.channels.actionLog;
     if (!logChannelId) return;
-    
+
     const channel = guild.channels.cache.get(logChannelId);
-    if (channel) {
-        const embed = new EmbedBuilder()
-            .setTitle(title)
-            .setDescription(description)
-            .setColor(color)
-            .setTimestamp();
-        await channel.send({ embeds: [embed] }).catch(console.error);
-    }
+    if (!channel) return;
+
+    const embed = new EmbedBuilder()
+        .setTitle(title)
+        .setDescription(description)
+        .setColor(color)
+        .setTimestamp();
+
+    await channel.send({ embeds: [embed] }).catch(console.error);
 }
 
-// Helper to add internal log and return formatted string
 function addSessionLog(state, message) {
     const timestamp = Math.floor(Date.now() / 1000);
-    const logEntry = `${config.emojis.arrow} ${message} <t:${timestamp}>.`;
-    state.sessionLogs.push(logEntry);
-    return state.sessionLogs.join('\n');
+    const entry = `• ${message} <t:${timestamp}:R>`;
+    state.sessionLogs.push(entry);
+    return entry;
 }
 
-// Helper to fetch server stats
-async function fetchServerStats() {
+function formatRoster(state) {
+    if (state.joinedUsers.size === 0) return 'No members added yet.';
+    return Array.from(state.joinedUsers).map(id => `<@${id}>`).join('\n');
+}
+
+function buildSessionEmbed(state) {
+    const isActive = state.status === 'ACTIVE';
+    const title = isActive ? '🔫 Mafia Session Active' : '🔫 Mafia Session Signups';
+    const description = isActive
+        ? `Hosted by <@${state.hostId}>.\nThe session is now active.`
+        : `Hosted by <@${state.hostId}>.\nReact with ${JOIN_EMOJI} to join.\n**First ${MAX_MEMBERS} only.**`;
+
+    return new EmbedBuilder()
+        .setTitle(title)
+        .setDescription(description)
+        .addFields(
+            { name: 'Slots', value: `${state.joinedUsers.size}/${MAX_MEMBERS}`, inline: true },
+            { name: 'Status', value: state.status, inline: true },
+            { name: 'Roster', value: formatRoster(state), inline: false }
+        )
+        .setColor(EMBED_COLOR)
+        .setTimestamp();
+}
+
+function buildManagementEmbeds(state) {
+    if (state.status === 'IDLE') {
+        return [
+            new EmbedBuilder()
+                .setTitle('🔫 No Active Mafia Session')
+                .setDescription('Use the menu below to host a mafia session.')
+                .setColor(EMBED_COLOR)
+        ];
+    }
+
+    const mainEmbed = new EmbedBuilder()
+        .setTitle(state.status === 'ACTIVE' ? '🔫 Active Mafia Session' : '🔫 Mafia Session Signups')
+        .setDescription(`Hosted by <@${state.hostId}> <t:${state.startTime}:R>.`)
+        .addFields(
+            { name: 'Slots', value: `${state.joinedUsers.size}/${MAX_MEMBERS}`, inline: true },
+            { name: 'Status', value: state.status, inline: true },
+            { name: 'Roster', value: formatRoster(state), inline: false }
+        )
+        .setColor(EMBED_COLOR);
+
+    const logsEmbed = new EmbedBuilder()
+        .setTitle('📝 Session Logs')
+        .setDescription(state.sessionLogs.length ? state.sessionLogs.join('\n') : 'No logs yet.')
+        .setColor(EMBED_COLOR);
+
+    return [mainEmbed, logsEmbed];
+}
+
+function buildManagementComponents(state) {
+    if (state.status === 'IDLE') {
+        return [
+            new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId('session_manage_menu')
+                    .setPlaceholder('Select an option')
+                    .addOptions([
+                        {
+                            label: 'Host Session',
+                            value: 'host_session',
+                            description: 'Create the session signup message',
+                            emoji: '🚀'
+                        }
+                    ])
+            )
+        ];
+    }
+
+    return [
+        new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('session_manage_menu')
+                .setPlaceholder('Select an option')
+                .addOptions([
+                    {
+                        label: 'Add Member',
+                        value: 'add_member',
+                        description: 'Manually add someone to the session',
+                        emoji: '➕'
+                    },
+                    {
+                        label: 'Remove Member',
+                        value: 'remove_member',
+                        description: 'Manually remove someone from the session',
+                        emoji: '➖'
+                    },
+                    {
+                        label: 'End Session',
+                        value: 'end_session',
+                        description: 'End the current mafia session',
+                        emoji: '🛑'
+                    }
+                ])
+        )
+    ];
+}
+
+async function updateManagementPanel(guild, state) {
+    if (!state.managementMessageId || !state.managementChannelId) return;
+
+    const channel = guild.channels.cache.get(state.managementChannelId);
+    if (!channel) return;
+
     try {
-        const headers = { 'Server-Key': config.serverKey };
-        
-        const [playersRes, queueRes] = await Promise.all([
-            fetch('https://api.policeroleplay.community/v1/server/players', { headers }),
-            fetch('https://api.policeroleplay.community/v1/server/queue', { headers })
-        ]);
+        const msg = await channel.messages.fetch(state.managementMessageId);
+        if (!msg) return;
 
-        if (!playersRes.ok || !queueRes.ok) {
-            console.error('API Error:', playersRes.status, queueRes.status);
-            return { players: 'N/A', queue: 'N/A' };
-        }
-
-        const playersData = await playersRes.json();
-        const queueData = await queueRes.json();
-
-        // Determine count based on response type (Array vs Object)
-        const playerCount = Array.isArray(playersData) ? playersData.length : (playersData.length || 0);
-        const queueCount = Array.isArray(queueData) ? queueData.length : (queueData.length || 0);
-
-        return { players: playerCount, queue: queueCount };
-    } catch (error) {
-        console.error('Failed to fetch stats:', error);
-        return { players: 'Error', queue: 'Error' };
+        await msg.edit({
+            embeds: buildManagementEmbeds(state),
+            components: buildManagementComponents(state)
+        });
+    } catch (err) {
+        console.error('Failed to update management panel:', err);
     }
 }
 
-// Helper to clear existing stats interval
-function clearStatsInterval(state) {
-    if (state.statsInterval) {
-        clearInterval(state.statsInterval);
-        state.statsInterval = null;
+async function updateSessionMessage(guild, state) {
+    if (!state.sessionMessageId || !state.sessionChannelId) return;
+
+    const channel = guild.channels.cache.get(state.sessionChannelId);
+    if (!channel) return;
+
+    try {
+        const msg = await channel.messages.fetch(state.sessionMessageId);
+        if (!msg) return;
+
+        await msg.edit({
+            embeds: [buildSessionEmbed(state)]
+        });
+    } catch (err) {
+        console.error('Failed to update session message:', err);
     }
+}
+
+async function startSession(guild, state) {
+    if (state.started || state.joinedUsers.size < MAX_MEMBERS) return;
+
+    state.started = true;
+    state.status = 'ACTIVE';
+
+    addSessionLog(state, `Session automatically started with ${MAX_MEMBERS} members`);
+
+    const channel = guild.channels.cache.get(state.sessionChannelId);
+    if (channel) {
+        const memberMentions = Array.from(state.joinedUsers).map(id => `<@${id}>`).join(' ');
+        await channel.send({
+            content: `${memberMentions}\nYour mafia session is now starting. You were the first ${MAX_MEMBERS} to join.`
+        }).catch(console.error);
+    }
+
+    await updateSessionMessage(guild, state);
+    await updateManagementPanel(guild, state);
+    await logToChannel(guild, 'Mafia Session Started', `Session started automatically with ${MAX_MEMBERS} members.`, EMBED_COLOR);
+}
+
+async function resetSession(guildId) {
+    const state = getOrInitState(guildId);
+
+    state.sessionMessageId = null;
+    state.sessionChannelId = null;
+    state.hostId = null;
+    state.startTime = null;
+    state.status = 'IDLE';
+    state.joinedUsers.clear();
+    state.sessionLogs = [];
+    state.started = false;
 }
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('session')
-        .setDescription('Manage RP Sessions')
+        .setDescription('Manage mafia sessions')
         .addSubcommand(subcommand =>
             subcommand
                 .setName('manage')
-                .setDescription('Open the session management panel')
+                .setDescription('Open the mafia session management panel')
         ),
 
     async execute(interaction) {
-        // Permission Check
-        if (!hasAccess(interaction.member)) {
-            return interaction.reply({ 
-                content: `You do not have permission to use this command.`, 
-                ephemeral: true 
+        if (!hasCommandAccess(interaction.member)) {
+            return interaction.reply({
+                content: 'You do not have permission to use this command.',
+                ephemeral: true
             });
         }
 
-        if (interaction.options.getSubcommand() === 'manage') {
-            const state = getOrInitState(interaction.guildId);
+        const state = getOrInitState(interaction.guildId);
 
-            let embeds = [];
-            let components = [];
+        await interaction.reply({
+            embeds: buildManagementEmbeds(state),
+            components: buildManagementComponents(state)
+        });
 
-            // Determine what to show based on current status
-            if (state.status === 'POLL') {
-                const manageEmbed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} Session Poll in Progress`)
-                    .setDescription(`A session poll was started by <@${state.hostId}> <t:${state.startTime}:R>.`)
-                    .addFields(
-                        { name: '**Votes**', value: `${state.voters.size}`, inline: true },
-                        { name: '**Votes Required**', value: '10', inline: true }
-                    )
-                    .setColor(EMBED_COLOR);
-                embeds.push(manageEmbed);
-
-                const row = new ActionRowBuilder().addComponents(
-                    new StringSelectMenuBuilder()
-                        .setCustomId('session_manage_menu')
-                        .setPlaceholder('Select an option')
-                        .addOptions([
-                            { label: 'Start Session', value: 'start_session', emoji: '🚀' },
-                            { label: 'Cancel Poll', value: 'cancel_poll', emoji: '❌' },
-                            { label: 'See Voters', value: 'see_voters', emoji: '👀' }
-                        ])
-                );
-                components.push(row);
-
-            } else if (state.status === 'ACTIVE') {
-                const activeEmbed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} Active Session`)
-                    .setDescription(`The session was started by <@${state.hostId}> <t:${state.startTime}:R>. ${state.startReason}`)
-                    .setColor(EMBED_COLOR);
-
-                const logsEmbed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} Session Logs`)
-                    .setDescription(state.sessionLogs.length > 0 ? state.sessionLogs.join('\n') : 'No logs yet.')
-                    .setColor(EMBED_COLOR);
-                embeds.push(activeEmbed, logsEmbed);
-
-                const row = new ActionRowBuilder().addComponents(
-                    new StringSelectMenuBuilder()
-                        .setCustomId('session_manage_menu')
-                        .setPlaceholder('Select an option')
-                        .addOptions([
-                            { label: 'Shutdown Session', value: 'shutdown_session', emoji: '🛑' },
-                            { label: 'Post Boost Message', value: 'post_boost', emoji: '🚀' }
-                        ])
-                );
-                components.push(row);
-
-            } else {
-                // IDLE Status
-                const embed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} No Active Session`)
-                    .setDescription('Start a session or create a poll by clicking the buttons below this message')
-                    .setColor(EMBED_COLOR);
-                embeds.push(embed);
-
-                const row = new ActionRowBuilder()
-                    .addComponents(
-                        new StringSelectMenuBuilder()
-                            .setCustomId('session_manage_menu')
-                            .setPlaceholder('Select an option')
-                            .addOptions([
-                                {
-                                    label: 'Start Session',
-                                    value: 'start_session',
-                                    description: 'Start the session immediately',
-                                    emoji: '🚀'
-                                },
-                                {
-                                    label: 'Create Poll',
-                                    value: 'create_poll',
-                                    description: 'Start a vote for a session',
-                                    emoji: '📊'
-                                }
-                            ])
-                    );
-                components.push(row);
-            }
-
-            await interaction.reply({ embeds: embeds, components: components });
-            const message = await interaction.fetchReply();
-            
-            // Store management panel details to allow updates later
-            state.managementMessageId = message.id;
-            state.managementChannelId = interaction.channelId;
-        }
+        const msg = await interaction.fetchReply();
+        state.managementMessageId = msg.id;
+        state.managementChannelId = interaction.channelId;
     },
 
-    // Unified handler for buttons and dropdowns related to this feature
     async handleInteraction(interaction) {
-        const guildId = interaction.guildId;
-        const state = getOrInitState(guildId);
+        const state = getOrInitState(interaction.guildId);
 
-        // --- BUTTON HANDLING (VOTING) ---
-        if (interaction.isButton()) {
-            if (interaction.customId === 'poll_vote_btn') {
-                const userId = interaction.user.id;
-
-                // Toggle vote
-                if (state.voters.has(userId)) {
-                    state.voters.delete(userId);
-                    await interaction.deferUpdate();
-                } else {
-                    state.voters.add(userId);
-                    await interaction.deferUpdate();
-                }
-
-                // Update Poll Message Button
-                const voteCount = state.voters.size;
-                const newButton = new ButtonBuilder()
-                    .setCustomId('poll_vote_btn')
-                    .setLabel(`(${voteCount}) Vote`)
-                    .setStyle(ButtonStyle.Primary);
-
-                const actionRow = new ActionRowBuilder().addComponents(newButton);
-                await interaction.message.edit({ components: [actionRow] });
-
-                // Update Management Panel Vote Count
-                if (state.managementMessageId && state.managementChannelId) {
-                    const manageChannel = interaction.guild.channels.cache.get(state.managementChannelId);
-                    if (manageChannel) {
-                        try {
-                            const manageMsg = await manageChannel.messages.fetch(state.managementMessageId);
-                            if (manageMsg) {
-                                // Reconstruct the Embed based on current state (POLL)
-                                const manageEmbed = new EmbedBuilder()
-                                    .setTitle(`${config.emojis.crpc} Session Poll in Progress`)
-                                    .setDescription(`A session poll was started by <@${state.hostId}> <t:${state.startTime}:R>.`)
-                                    .addFields(
-                                        { name: '**Votes**', value: `${state.voters.size}`, inline: true },
-                                        { name: '**Votes Required**', value: '10', inline: true }
-                                    )
-                                    .setColor(EMBED_COLOR);
-                                
-                                await manageMsg.edit({ embeds: [manageEmbed] });
-                            }
-                        } catch (e) { console.error('Failed to update management panel on vote:', e); }
-                    }
-                }
-
-                // Check for 10 votes trigger
-                if (voteCount === 10) {
-                    const adminChannel = interaction.guild.channels.cache.get(config.channels.adminNotification);
-                    if (adminChannel) {
-                        await adminChannel.send({
-                            content: `<@&${config.roles.voteReachedPing}> The session poll has reached 10 votes!`
-                        });
-                    }
-                    await logToChannel(interaction.guild, 'Poll Votes Reached', `The poll reached 10 votes.`, EMBED_COLOR);
-                }
-            }
-        }
-
-        // --- DROPDOWN HANDLING ---
         if (interaction.isStringSelectMenu() && interaction.customId === 'session_manage_menu') {
-            // Permission Check for Dropdowns
-            if (!hasAccess(interaction.member)) {
-                return interaction.reply({ 
-                    content: `You do not have permission to use this menu.`, 
-                    ephemeral: true 
+            if (!hasCommandAccess(interaction.member) && !hasSlotAccess(interaction.member)) {
+                return interaction.reply({
+                    content: 'You do not have permission to use this menu.',
+                    ephemeral: true
                 });
             }
 
             const selected = interaction.values[0];
 
-            // 1. CREATE POLL
-            if (selected === 'create_poll') {
+            if (selected === 'host_session') {
+                if (!hasCommandAccess(interaction.member)) {
+                    return interaction.reply({
+                        content: 'Only command access can host a session.',
+                        ephemeral: true
+                    });
+                }
+
+                if (state.status !== 'IDLE') {
+                    return interaction.reply({
+                        content: 'There is already an active or pending session.',
+                        ephemeral: true
+                    });
+                }
+
+                const sessionChannel = interaction.guild.channels.cache.get(config.channels.sessionAnnouncement);
+                if (!sessionChannel) {
+                    return interaction.reply({
+                        content: 'Session announcement channel is not configured correctly.',
+                        ephemeral: true
+                    });
+                }
+
                 state.hostId = interaction.user.id;
                 state.startTime = Math.floor(Date.now() / 1000);
-                state.status = 'POLL';
-                state.voters.clear();
-
-                const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
-                if (pollChannel) {
-                    // Delete leftover shutdown message from previous session if it exists
-                    if (state.shutdownMessageId) {
-                        try {
-                            const ssdMsg = await pollChannel.messages.fetch(state.shutdownMessageId);
-                            if (ssdMsg) await ssdMsg.delete();
-                        } catch (e) { }
-                        state.shutdownMessageId = null;
-                    }
-
-                    // Send to Poll Channel
-                    const pollEmbed = new EmbedBuilder()
-                        .setTitle(`${config.emojis.crpc} Session Poll`)
-                        .setDescription(`A session poll was started by <@${state.hostId}>. Vote below to start the session. 10 votes required.`)
-                        .setColor(EMBED_COLOR);
-                    
-                    const voteBtn = new ButtonBuilder()
-                        .setCustomId('poll_vote_btn')
-                        .setLabel('Vote')
-                        .setStyle(ButtonStyle.Primary);
-
-                    const pollMsg = await pollChannel.send({
-                        content: `<@&${config.roles.pollPing}> @here`,
-                        embeds: [pollEmbed],
-                        components: [new ActionRowBuilder().addComponents(voteBtn)],
-                        allowedMentions: { parse: ['roles', 'everyone'] }
-                    });
-
-                    state.pollMessageId = pollMsg.id;
-                }
-
-                // Update Manager Embed
-                const manageEmbed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} Session Poll in Progress`)
-                    .setDescription(`A session poll was started by <@${state.hostId}> <t:${state.startTime}:R>.`)
-                    .addFields(
-                        { name: '**Votes**', value: `${state.voters.size}`, inline: true },
-                        { name: '**Votes Required**', value: '10', inline: true }
-                    )
-                    .setColor(EMBED_COLOR);
-
-                const row = new ActionRowBuilder().addComponents(
-                    new StringSelectMenuBuilder()
-                        .setCustomId('session_manage_menu')
-                        .setPlaceholder('Select an option')
-                        .addOptions([
-                            { label: 'Start Session', value: 'start_session', emoji: '🚀' },
-                            { label: 'Cancel Poll', value: 'cancel_poll', emoji: '❌' },
-                            { label: 'See Voters', value: 'see_voters', emoji: '👀' }
-                        ])
-                );
-
-                await interaction.update({ embeds: [manageEmbed], components: [row] });
-                await logToChannel(interaction.guild, 'Poll Created', `Poll started by <@${state.hostId}>`, EMBED_COLOR);
-            }
-
-            // 2. SEE VOTERS
-            else if (selected === 'see_voters') {
-                const voterList = state.voters.size > 0 
-                    ? Array.from(state.voters).map(id => `<@${id}>`).join('\n') 
-                    : 'No voters yet.';
-
-                const embed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} ${state.voters.size} Voter(s)`)
-                    .setDescription(voterList)
-                    .setColor(EMBED_COLOR);
-
-                await interaction.reply({ embeds: [embed], ephemeral: true });
-            }
-
-            // 3. CANCEL POLL
-            else if (selected === 'cancel_poll') {
-                // Delete Poll Message
-                if (state.pollMessageId) {
-                    const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
-                    if (pollChannel) {
-                        try {
-                            const msg = await pollChannel.messages.fetch(state.pollMessageId);
-                            if (msg) await msg.delete();
-                        } catch (e) { }
-                    }
-                }
-
-                // Send Shutdown Message
-                const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
-                if (pollChannel) {
-                    // Construct Single Embed (Text + Image)
-                    const shutdownEmbed = new EmbedBuilder()
-                        .setDescription(`The server has shutdown. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`)
-                        .setColor(EMBED_COLOR);
-
-                    if (config.images && config.images.shutdown) {
-                        shutdownEmbed.setImage(config.images.shutdown);
-                    }
-
-                    const ssdMsg = await pollChannel.send({
-                        embeds: [shutdownEmbed]
-                    });
-                    state.shutdownMessageId = ssdMsg.id;
-                }
-
-                // Reset Panel
-                const resetEmbed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} No Active Session`)
-                    .setDescription('Start a session or create a poll by clicking the buttons below this message')
-                    .setColor(EMBED_COLOR);
-
-                const row = new ActionRowBuilder().addComponents(
-                    new StringSelectMenuBuilder()
-                        .setCustomId('session_manage_menu')
-                        .setPlaceholder('Select an option')
-                        .addOptions([
-                            { label: 'Start Session', value: 'start_session', emoji: '🚀' },
-                            { label: 'Create Poll', value: 'create_poll', emoji: '📊' }
-                        ])
-                );
-
-                // Reset session state
-                clearStatsInterval(state);
-                state.status = 'IDLE';
-                state.voters.clear();
-                state.pollMessageId = null;
-                state.startupMessageId = null;
-                state.boostMessageIds = [];
+                state.status = 'SIGNUPS';
+                state.joinedUsers.clear();
                 state.sessionLogs = [];
-                
-                await interaction.update({ embeds: [resetEmbed], components: [row] });
-                await logToChannel(interaction.guild, 'Poll Cancelled', `Poll cancelled by <@${interaction.user.id}>`, EMBED_COLOR);
+                state.started = false;
+
+                addSessionLog(state, `Session hosted by <@${interaction.user.id}>`);
+
+                const sessionMsg = await sessionChannel.send({
+                    embeds: [buildSessionEmbed(state)]
+                });
+
+                await sessionMsg.react(JOIN_EMOJI);
+
+                state.sessionMessageId = sessionMsg.id;
+                state.sessionChannelId = sessionChannel.id;
+
+                await interaction.update({
+                    embeds: buildManagementEmbeds(state),
+                    components: buildManagementComponents(state)
+                });
+
+                await logToChannel(
+                    interaction.guild,
+                    'Mafia Session Hosted',
+                    `Session hosted by <@${interaction.user.id}>.`,
+                    EMBED_COLOR
+                );
             }
 
-            // 4. START SESSION (From Poll or Direct)
-            else if (selected === 'start_session') {
-                // Defer update first since API call might take a moment
-                await interaction.deferUpdate();
-
-                const wasPoll = state.status === 'POLL';
-                const voteCount = state.voters.size;
-                state.status = 'ACTIVE';
-                state.sessionLogs = []; // Reset logs
-                clearStatsInterval(state); // Ensure no duplicate intervals
-                
-                if (!wasPoll) {
-                    state.hostId = interaction.user.id;
-                    state.startTime = Math.floor(Date.now() / 1000);
-                    state.voters.clear();
-                }
-
-                state.startReason = wasPoll 
-                    ? `The session was started after a poll with ${voteCount} votes.` 
-                    : `The session was started after a poll with 0 votes.`; 
-
-                // Fetch Stats
-                const stats = await fetchServerStats();
-
-                const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
-                if (pollChannel) {
-                    // Delete previous shutdown message if it exists
-                    if (state.shutdownMessageId) {
-                        try {
-                            const ssdMsg = await pollChannel.messages.fetch(state.shutdownMessageId);
-                            if (ssdMsg) await ssdMsg.delete();
-                        } catch (e) { }
-                        state.shutdownMessageId = null;
-                    }
-
-                    // Delete Poll Message if it exists
-                    if (state.pollMessageId) {
-                        try {
-                            const msg = await pollChannel.messages.fetch(state.pollMessageId);
-                            if (msg) await msg.delete();
-                        } catch (e) { }
-                    }
-
-                    // Construct Single Embed (Text + Image)
-                    const startupEmbed = new EmbedBuilder()
-                        .setDescription(`A server startup has been hosted! The server is now open for all players to join. Please ensure you follow all server rules and enjoy the session. Join instantly by [clicking here](https://policeroleplay.community/join/chicagoRPC) or join by using code "chicagoRPC".`)
-                        .addFields(
-                            { name: '`Server Player Count:`', value: `${stats.players}`, inline: true },
-                            { name: '`Server Queue:`', value: `${stats.queue}`, inline: true }
-                        )
-                        .setColor(EMBED_COLOR);
-
-                    if (config.images && config.images.startup) {
-                        startupEmbed.setImage(config.images.startup);
-                    }
-
-                    const startupMsg = await pollChannel.send({
-                        content: `<@&${config.roles.sessionPing}> @here`,
-                        embeds: [startupEmbed],
-                        allowedMentions: { parse: ['roles', 'everyone'] }
+            else if (selected === 'add_member') {
+                if (!hasSlotAccess(interaction.member)) {
+                    return interaction.reply({
+                        content: 'You do not have permission to add members.',
+                        ephemeral: true
                     });
-                    state.startupMessageId = startupMsg.id;
-
-                    // Setup Auto-Update Interval (5 Minutes)
-                    state.statsInterval = setInterval(async () => {
-                        try {
-                            const freshStats = await fetchServerStats();
-                            // Fetch the message to make sure it still exists
-                            const msg = await pollChannel.messages.fetch(startupMsg.id);
-                            if (msg) {
-                                // Recreate the single embed with new stats
-                                const updatedStartupEmbed = new EmbedBuilder()
-                                    .setDescription(`A server startup has been hosted! The server is now open for all players to join. Please ensure you follow all server rules and enjoy the session. Join instantly by [clicking here](https://policeroleplay.community/join/chicagoRPC) or join by using code "chicagoRPC".`)
-                                    .addFields(
-                                        { name: '`Server Player Count:`', value: `${freshStats.players}`, inline: true },
-                                        { name: '`Server Queue:`', value: `${freshStats.queue}`, inline: true }
-                                    )
-                                    .setColor(EMBED_COLOR);
-
-                                if (config.images && config.images.startup) {
-                                    updatedStartupEmbed.setImage(config.images.startup);
-                                }
-                                
-                                await msg.edit({ embeds: [updatedStartupEmbed] });
-                            }
-                        } catch (err) {
-                            console.error('Failed to update stats or message deleted:', err);
-                            clearStatsInterval(state);
-                        }
-                    }, 5 * 60 * 1000);
                 }
 
-                // Log generation
-                addSessionLog(state, `Session startup message was posted`);
-                if (wasPoll) {
-                    addSessionLog(state, `Session was started by <@${state.hostId}> after a poll with ${voteCount} votes`);
-                } else {
-                    addSessionLog(state, `Session was started by <@${state.hostId}> after a poll with 0 votes`);
+                if (state.status === 'IDLE') {
+                    return interaction.reply({
+                        content: 'There is no active session.',
+                        ephemeral: true
+                    });
                 }
-
-                // Update Manager Panel
-                const activeEmbed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} Active Session`)
-                    .setDescription(`The session was started by <@${state.hostId}> <t:${state.startTime}:R>. ${state.startReason}`)
-                    .setColor(EMBED_COLOR);
-
-                const logsEmbed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} Session Logs`)
-                    .setDescription(state.sessionLogs.join('\n'))
-                    .setColor(EMBED_COLOR);
 
                 const row = new ActionRowBuilder().addComponents(
-                    new StringSelectMenuBuilder()
-                        .setCustomId('session_manage_menu')
-                        .setPlaceholder('Select an option')
-                        .addOptions([
-                            { label: 'Shutdown Session', value: 'shutdown_session', emoji: '🛑' },
-                            { label: 'Post Boost Message', value: 'post_boost', emoji: '🚀' }
-                        ])
+                    new UserSelectMenuBuilder()
+                        .setCustomId('session_add_member_user')
+                        .setPlaceholder('Select a user to add')
+                        .setMinValues(1)
+                        .setMaxValues(1)
                 );
 
-                await interaction.editReply({ embeds: [activeEmbed, logsEmbed], components: [row] });
-                await logToChannel(interaction.guild, 'Session Started', `Session started by <@${interaction.user.id}>. Mode: ${wasPoll ? 'Poll' : 'Direct'}.`, EMBED_COLOR);
+                return interaction.reply({
+                    content: 'Select a user to add to the session.',
+                    components: [row],
+                    ephemeral: true
+                });
             }
 
-            // 5. POST BOOST MESSAGE
-            else if (selected === 'post_boost') {
-                const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
-                if (pollChannel) {
-                    // Boost Embed (Single Embed, No Image)
-                    const textEmbed = new EmbedBuilder()
-                        .setDescription('The session is still ongoing, don’t miss out! Jump in and join the action now!')
-                        .setColor(EMBED_COLOR);
-                    
-                    const joinButton = new ButtonBuilder()
-                        .setLabel('Join Server')
-                        .setStyle(ButtonStyle.Link)
-                        .setURL('https://policeroleplay.community/join/chicagoRPC');
-
-                    const boostMsg = await pollChannel.send({ 
-                        content: `<@&${config.roles.sessionPing}> @here`,
-                        embeds: [textEmbed],
-                        components: [new ActionRowBuilder().addComponents(joinButton)],
-                        allowedMentions: { parse: ['roles', 'everyone'] }
+            else if (selected === 'remove_member') {
+                if (!hasSlotAccess(interaction.member)) {
+                    return interaction.reply({
+                        content: 'You do not have permission to remove members.',
+                        ephemeral: true
                     });
-                    // Store ID for cleanup
-                    state.boostMessageIds.push(boostMsg.id);
                 }
 
-                // Feature 4: Log boost in internal logs
-                addSessionLog(state, `Boost message was posted by <@${interaction.user.id}>`);
+                if (state.status === 'IDLE') {
+                    return interaction.reply({
+                        content: 'There is no active session.',
+                        ephemeral: true
+                    });
+                }
 
-                // Update Management Panel to show new log
-                const activeEmbed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} Active Session`)
-                    .setDescription(`The session was started by <@${state.hostId}> <t:${state.startTime}:R>. ${state.startReason}`)
-                    .setColor(EMBED_COLOR);
-
-                const logsEmbed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} Session Logs`)
-                    .setDescription(state.sessionLogs.join('\n'))
-                    .setColor(EMBED_COLOR);
-                
                 const row = new ActionRowBuilder().addComponents(
-                    new StringSelectMenuBuilder()
-                        .setCustomId('session_manage_menu')
-                        .setPlaceholder('Select an option')
-                        .addOptions([
-                            { label: 'Shutdown Session', value: 'shutdown_session', emoji: '🛑' },
-                            { label: 'Post Boost Message', value: 'post_boost', emoji: '🚀' }
-                        ])
+                    new UserSelectMenuBuilder()
+                        .setCustomId('session_remove_member_user')
+                        .setPlaceholder('Select a user to remove')
+                        .setMinValues(1)
+                        .setMaxValues(1)
                 );
 
-                await interaction.update({ embeds: [activeEmbed, logsEmbed], components: [row] });
-                await logToChannel(interaction.guild, 'Boost Posted', `Boost message posted by <@${interaction.user.id}>.`, EMBED_COLOR);
+                return interaction.reply({
+                    content: 'Select a user to remove from the session.',
+                    components: [row],
+                    ephemeral: true
+                });
             }
 
-            // 6. SHUTDOWN SESSION
-            else if (selected === 'shutdown_session') {
-                const pollChannel = interaction.guild.channels.cache.get(config.channels.pollAnnouncement);
-                
-                // Cleanup
-                if (pollChannel) {
-                    // Delete SSU
-                    if (state.startupMessageId) {
-                        try {
-                            const msg = await pollChannel.messages.fetch(state.startupMessageId);
-                            if (msg) await msg.delete();
-                        } catch (e) { }
-                    }
-                    // Delete Boost Messages
-                    for (const boostId of state.boostMessageIds) {
-                        try {
-                            const msg = await pollChannel.messages.fetch(boostId);
-                            if (msg) await msg.delete();
-                        } catch (e) { }
-                    }
-
-                    // Construct Single Embed (Text + Image)
-                    const shutdownEmbed = new EmbedBuilder()
-                        .setDescription(`The server has shutdown. Thank you to everyone who joined and participated in the session! While the server may still be accessible, please be aware that no moderators will be present. We appreciate your time and hope to see you in the next one!`)
-                        .setColor(EMBED_COLOR);
-
-                    if (config.images && config.images.shutdown) {
-                        shutdownEmbed.setImage(config.images.shutdown);
-                    }
-
-                    const ssdMsg = await pollChannel.send({
-                        embeds: [shutdownEmbed]
+            else if (selected === 'end_session') {
+                if (!hasCommandAccess(interaction.member)) {
+                    return interaction.reply({
+                        content: 'Only command access can end a session.',
+                        ephemeral: true
                     });
-                    
-                    // Store Shutdown ID for next session start cleanup
-                    state.shutdownMessageId = ssdMsg.id;
                 }
 
-                // Reset Management Panel
-                const resetEmbed = new EmbedBuilder()
-                    .setTitle(`${config.emojis.crpc} No Active Session`)
-                    .setDescription('Start a session or create a poll by clicking the buttons below this message')
-                    .setColor(EMBED_COLOR);
+                if (state.status === 'IDLE') {
+                    return interaction.reply({
+                        content: 'There is no active session to end.',
+                        ephemeral: true
+                    });
+                }
 
-                const row = new ActionRowBuilder().addComponents(
-                    new StringSelectMenuBuilder()
-                        .setCustomId('session_manage_menu')
-                        .setPlaceholder('Select an option')
-                        .addOptions([
-                            { label: 'Start Session', value: 'start_session', emoji: '🚀' },
-                            { label: 'Create Poll', value: 'create_poll', emoji: '📊' }
-                        ])
+                const oldHost = state.hostId;
+                await resetSession(interaction.guildId);
+                await updateManagementPanel(interaction.guild, getOrInitState(interaction.guildId));
+
+                await interaction.update({
+                    embeds: buildManagementEmbeds(getOrInitState(interaction.guildId)),
+                    components: buildManagementComponents(getOrInitState(interaction.guildId))
+                });
+
+                await logToChannel(
+                    interaction.guild,
+                    'Mafia Session Ended',
+                    `Session ended by <@${interaction.user.id}>. Hosted by <@${oldHost}>.`,
+                    EMBED_COLOR
                 );
-
-                // Reset session state but preserve shutdown ID and panel info
-                clearStatsInterval(state);
-                state.status = 'IDLE';
-                state.voters.clear();
-                state.pollMessageId = null;
-                state.startupMessageId = null;
-                state.boostMessageIds = [];
-                state.sessionLogs = [];
-                // state.shutdownMessageId is preserved
-
-                await interaction.update({ embeds: [resetEmbed], components: [row] });
-                await logToChannel(interaction.guild, 'Session Shutdown', `Session shutdown by <@${interaction.user.id}>.`, EMBED_COLOR);
             }
         }
+
+        if (interaction.isUserSelectMenu()) {
+            if (!hasSlotAccess(interaction.member)) {
+                return interaction.reply({
+                    content: 'You do not have permission to manage session members.',
+                    ephemeral: true
+                });
+            }
+
+            const state = getOrInitState(interaction.guildId);
+            const targetId = interaction.values[0];
+
+            if (interaction.customId === 'session_add_member_user') {
+                if (state.status === 'IDLE') {
+                    return interaction.update({
+                        content: 'There is no active session.',
+                        components: []
+                    });
+                }
+
+                if (state.joinedUsers.has(targetId)) {
+                    return interaction.update({
+                        content: `<@${targetId}> is already in the session.`,
+                        components: []
+                    });
+                }
+
+                if (state.joinedUsers.size >= MAX_MEMBERS) {
+                    return interaction.update({
+                        content: `The session is already full (${MAX_MEMBERS}/${MAX_MEMBERS}).`,
+                        components: []
+                    });
+                }
+
+                state.joinedUsers.add(targetId);
+                addSessionLog(state, `<@${interaction.user.id}> manually added <@${targetId}>`);
+
+                await updateSessionMessage(interaction.guild, state);
+                await updateManagementPanel(interaction.guild, state);
+                await logToChannel(
+                    interaction.guild,
+                    'Session Member Added',
+                    `<@${interaction.user.id}> added <@${targetId}> to the session.`,
+                    EMBED_COLOR
+                );
+
+                if (state.joinedUsers.size === MAX_MEMBERS && !state.started) {
+                    await startSession(interaction.guild, state);
+                }
+
+                return interaction.update({
+                    content: `<@${targetId}> was added to the session.`,
+                    components: []
+                });
+            }
+
+            if (interaction.customId === 'session_remove_member_user') {
+                if (state.status === 'IDLE') {
+                    return interaction.update({
+                        content: 'There is no active session.',
+                        components: []
+                    });
+                }
+
+                if (!state.joinedUsers.has(targetId)) {
+                    return interaction.update({
+                        content: `<@${targetId}> is not in the session.`,
+                        components: []
+                    });
+                }
+
+                state.joinedUsers.delete(targetId);
+                addSessionLog(state, `<@${interaction.user.id}> manually removed <@${targetId}>`);
+
+                await updateSessionMessage(interaction.guild, state);
+                await updateManagementPanel(interaction.guild, state);
+                await logToChannel(
+                    interaction.guild,
+                    'Session Member Removed',
+                    `<@${interaction.user.id}> removed <@${targetId}> from the session.`,
+                    EMBED_COLOR
+                );
+
+                return interaction.update({
+                    content: `<@${targetId}> was removed from the session.`,
+                    components: []
+                });
+            }
+        }
+    },
+
+    async handleReactionAdd(reaction, user) {
+        if (user.bot) return;
+
+        if (reaction.partial) {
+            try { await reaction.fetch(); } catch { return; }
+        }
+
+        const message = reaction.message;
+        const state = getOrInitState(message.guild.id);
+
+        if (!state.sessionMessageId || message.id !== state.sessionMessageId) return;
+        if (reaction.emoji.name !== JOIN_EMOJI) return;
+        if (state.status !== 'SIGNUPS' && state.status !== 'ACTIVE') return;
+
+        if (state.joinedUsers.has(user.id)) return;
+
+        if (state.joinedUsers.size >= MAX_MEMBERS) {
+            try {
+                await reaction.users.remove(user.id);
+            } catch (err) {
+                console.error('Failed to remove extra reaction:', err);
+            }
+
+            await message.channel.send({
+                content: `<@${user.id}> This mafia session is full. Max is ${MAX_MEMBERS}.`
+            }).catch(console.error);
+
+            return;
+        }
+
+        state.joinedUsers.add(user.id);
+        addSessionLog(state, `<@${user.id}> joined the session by reaction`);
+
+        await updateSessionMessage(message.guild, state);
+        await updateManagementPanel(message.guild, state);
+
+        if (state.joinedUsers.size === MAX_MEMBERS && !state.started) {
+            await startSession(message.guild, state);
+        }
+    },
+
+    async handleReactionRemove(reaction, user) {
+        if (user.bot) return;
+
+        if (reaction.partial) {
+            try { await reaction.fetch(); } catch { return; }
+        }
+
+        const message = reaction.message;
+        const state = getOrInitState(message.guild.id);
+
+        if (!state.sessionMessageId || message.id !== state.sessionMessageId) return;
+        if (reaction.emoji.name !== JOIN_EMOJI) return;
+        if (!state.joinedUsers.has(user.id)) return;
+
+        state.joinedUsers.delete(user.id);
+        addSessionLog(state, `<@${user.id}> left the session`);
+
+        await updateSessionMessage(message.guild, state);
+        await updateManagementPanel(message.guild, state);
     }
 };
