@@ -15,6 +15,7 @@
     "@discordjs/util": "^1.1.0",
     "discord-api-types": "^0.37.93",
     "discord.js": "^14.15.3",
-    "noblox.js": "^6.2.0"
+    "noblox.js": "^6.2.0",
+    "dotenv": "^16.4.5"
   }
 }
