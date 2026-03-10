@@ -3,32 +3,44 @@ const {
     EmbedBuilder,
     ActionRowBuilder,
     StringSelectMenuBuilder,
-    UserSelectMenuBuilder,
-    ComponentType
+    UserSelectMenuBuilder
 } = require('discord.js');
 
 const config = require('../config.json');
 
 const sessionState = new Map();
-const EMBED_COLOR = '#111111';
-const JOIN_EMOJI = '✅';
-const MAX_MEMBERS = 4;
+
+const EMBED_COLOR = config.embedColor || '#111111';
+const MAX_MEMBERS = 6;
+const JOIN_EMOJI = config.reactions?.join || '✅';
+const QUEUE_EMOJI = config.reactions?.queue || '📋';
 
 function getOrInitState(guildId) {
     if (!sessionState.has(guildId)) {
         sessionState.set(guildId, {
-            sessionMessageId: null,
+            mainMessageId: null,
             sessionChannelId: null,
             managementMessageId: null,
             managementChannelId: null,
             hostId: null,
             startTime: null,
-            status: 'IDLE', // IDLE | SIGNUPS | ACTIVE
-            joinedUsers: new Set(),
+            status: 'IDLE',
+
+            activeMembers: new Set(),
+            queuedMembers: [],
+            allJoinedMembers: new Set(),
+            removedMembers: new Set(),
+
             sessionLogs: [],
-            started: false
+
+            boostMessageIds: [],
+            fullMessageIds: [],
+            auxMessageIds: [],
+
+            ended: false
         });
     }
+
     return sessionState.get(guildId);
 }
 
@@ -41,6 +53,146 @@ function hasSlotAccess(member) {
         member.roles.cache.has(config.roles.commandAccess) ||
         member.roles.cache.has(config.roles.sessionSlotManager)
     );
+}
+
+function sessionEmoji() {
+    return config.emojis?.session || '🔫';
+}
+
+function logEmoji() {
+    return config.emojis?.log || '•';
+}
+
+function boostEmoji() {
+    return config.emojis?.boost || '🚀';
+}
+
+function fullEmoji() {
+    return config.emojis?.full || '⛔';
+}
+
+function queueEmoji() {
+    return config.emojis?.queue || '📋';
+}
+
+function getRelativeTimestamp(unix) {
+    return `<t:${unix}:R>`;
+}
+
+function getLongTimestamp(unix) {
+    return `<t:${unix}:F>`;
+}
+
+function formatMentionsFromSet(set) {
+    if (!set || set.size === 0) return 'None';
+    return Array.from(set).map(id => `<@${id}>`).join('\n');
+}
+
+function formatQueue(arr) {
+    if (!arr || arr.length === 0) return 'None';
+    return arr.map((id, i) => `**${i + 1}.** <@${id}>`).join('\n');
+}
+
+function addSessionLog(state, message) {
+    const timestamp = Math.floor(Date.now() / 1000);
+    state.sessionLogs.push(`${logEmoji()} ${message} on ${getLongTimestamp(timestamp)}.`);
+}
+
+function getStatusText(state) {
+    if (state.status === 'IDLE') return 'No Session';
+    if (state.activeMembers.size === 0) return 'Starting Soon';
+    if (state.activeMembers.size >= MAX_MEMBERS) return 'Full';
+    return 'Available Slots';
+}
+
+function buildMainEmbed(state) {
+    return new EmbedBuilder()
+        .setColor(EMBED_COLOR)
+        .setDescription(
+            `**${sessionEmoji()} Active Session**\n` +
+            `The session was started by <@${state.hostId}> ${getRelativeTimestamp(state.startTime)}.\n`
+        )
+        .addFields(
+            {
+                name: 'Available Slots',
+                value: `${state.activeMembers.size}/${MAX_MEMBERS}`,
+                inline: true
+            },
+            {
+                name: 'Active Since',
+                value: `${getRelativeTimestamp(state.startTime)}`,
+                inline: true
+            },
+            {
+                name: 'Status',
+                value: getStatusText(state),
+                inline: true
+            }
+        );
+}
+
+function buildLogsEmbed(state) {
+    return new EmbedBuilder()
+        .setColor(EMBED_COLOR)
+        .setDescription(
+            `**${sessionEmoji()} Session Logs**\n` +
+            `${state.sessionLogs.length ? state.sessionLogs.join('\n') : `${logEmoji()} No logs yet.`}`
+        );
+}
+
+function buildIdleEmbed() {
+    return new EmbedBuilder()
+        .setColor(EMBED_COLOR)
+        .setDescription(`**${sessionEmoji()} No Active Session**\nUse the menu below to host a session.`);
+}
+
+function buildManageComponents(state) {
+    if (state.status === 'IDLE') {
+        return [
+            new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId('session_manage_menu')
+                    .setPlaceholder('Select an option')
+                    .addOptions([
+                        {
+                            label: 'Host Session',
+                            value: 'host_session',
+                            description: 'Host a new mafia session'
+                        }
+                    ])
+            )
+        ];
+    }
+
+    return [
+        new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('session_manage_menu')
+                .setPlaceholder('Select an option')
+                .addOptions([
+                    {
+                        label: 'Shutdown Session',
+                        value: 'shutdown_session'
+                    },
+                    {
+                        label: 'Post Boost Message',
+                        value: 'post_boost'
+                    },
+                    {
+                        label: 'Post Slots Full Message',
+                        value: 'post_full'
+                    },
+                    {
+                        label: 'Add Member',
+                        value: 'add_member'
+                    },
+                    {
+                        label: 'Remove Member',
+                        value: 'remove_member'
+                    }
+                ])
+        )
+    ];
 }
 
 async function logToChannel(guild, title, description, color = EMBED_COLOR) {
@@ -59,111 +211,43 @@ async function logToChannel(guild, title, description, color = EMBED_COLOR) {
     await channel.send({ embeds: [embed] }).catch(console.error);
 }
 
-function addSessionLog(state, message) {
-    const timestamp = Math.floor(Date.now() / 1000);
-    const entry = `• ${message} <t:${timestamp}:R>`;
-    state.sessionLogs.push(entry);
-    return entry;
-}
+async function logSessionEndedSummary(guild, state) {
+    const logChannelId = config.channels.sessionEndLog || config.channels.actionLog;
+    const channel = guild.channels.cache.get(logChannelId);
+    if (!channel) return;
 
-function formatRoster(state) {
-    if (state.joinedUsers.size === 0) return 'No members added yet.';
-    return Array.from(state.joinedUsers).map(id => `<@${id}>`).join('\n');
-}
+    const link = state.mainMessageId && state.sessionChannelId
+        ? `https://discord.com/channels/${guild.id}/${state.sessionChannelId}/${state.mainMessageId}`
+        : 'Unavailable';
 
-function buildSessionEmbed(state) {
-    const isActive = state.status === 'ACTIVE';
-    const title = isActive ? '🔫 Mafia Session Active' : '🔫 Mafia Session Signups';
-    const description = isActive
-        ? `Hosted by <@${state.hostId}>.\nThe session is now active.`
-        : `Hosted by <@${state.hostId}>.\nReact with ${JOIN_EMOJI} to join.\n**First ${MAX_MEMBERS} only.**`;
-
-    return new EmbedBuilder()
-        .setTitle(title)
-        .setDescription(description)
-        .addFields(
-            { name: 'Slots', value: `${state.joinedUsers.size}/${MAX_MEMBERS}`, inline: true },
-            { name: 'Status', value: state.status, inline: true },
-            { name: 'Roster', value: formatRoster(state), inline: false }
-        )
+    const embed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
-        .setTimestamp();
-}
-
-function buildManagementEmbeds(state) {
-    if (state.status === 'IDLE') {
-        return [
-            new EmbedBuilder()
-                .setTitle('🔫 No Active Mafia Session')
-                .setDescription('Use the menu below to host a mafia session.')
-                .setColor(EMBED_COLOR)
-        ];
-    }
-
-    const mainEmbed = new EmbedBuilder()
-        .setTitle(state.status === 'ACTIVE' ? '🔫 Active Mafia Session' : '🔫 Mafia Session Signups')
-        .setDescription(`Hosted by <@${state.hostId}> <t:${state.startTime}:R>.`)
+        .setTitle('Session Ended')
+        .setDescription(
+            `**Event Message:** ${link}\n` +
+            `**Hosted By:** <@${state.hostId}>\n` +
+            `**Started:** ${getLongTimestamp(state.startTime)}\n` +
+            `**Ended:** ${getLongTimestamp(Math.floor(Date.now() / 1000))}`
+        )
         .addFields(
-            { name: 'Slots', value: `${state.joinedUsers.size}/${MAX_MEMBERS}`, inline: true },
-            { name: 'Status', value: state.status, inline: true },
-            { name: 'Roster', value: formatRoster(state), inline: false }
-        )
-        .setColor(EMBED_COLOR);
+            {
+                name: 'Everyone Who Joined',
+                value: formatMentionsFromSet(state.allJoinedMembers),
+                inline: false
+            },
+            {
+                name: 'Removed During Session',
+                value: formatMentionsFromSet(state.removedMembers),
+                inline: false
+            },
+            {
+                name: 'Final Queue',
+                value: formatQueue(state.queuedMembers),
+                inline: false
+            }
+        );
 
-    const logsEmbed = new EmbedBuilder()
-        .setTitle('📝 Session Logs')
-        .setDescription(state.sessionLogs.length ? state.sessionLogs.join('\n') : 'No logs yet.')
-        .setColor(EMBED_COLOR);
-
-    return [mainEmbed, logsEmbed];
-}
-
-function buildManagementComponents(state) {
-    if (state.status === 'IDLE') {
-        return [
-            new ActionRowBuilder().addComponents(
-                new StringSelectMenuBuilder()
-                    .setCustomId('session_manage_menu')
-                    .setPlaceholder('Select an option')
-                    .addOptions([
-                        {
-                            label: 'Host Session',
-                            value: 'host_session',
-                            description: 'Create the session signup message',
-                            emoji: '🚀'
-                        }
-                    ])
-            )
-        ];
-    }
-
-    return [
-        new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-                .setCustomId('session_manage_menu')
-                .setPlaceholder('Select an option')
-                .addOptions([
-                    {
-                        label: 'Add Member',
-                        value: 'add_member',
-                        description: 'Manually add someone to the session',
-                        emoji: '➕'
-                    },
-                    {
-                        label: 'Remove Member',
-                        value: 'remove_member',
-                        description: 'Manually remove someone from the session',
-                        emoji: '➖'
-                    },
-                    {
-                        label: 'End Session',
-                        value: 'end_session',
-                        description: 'End the current mafia session',
-                        emoji: '🛑'
-                    }
-                ])
-        )
-    ];
+    await channel.send({ embeds: [embed] }).catch(console.error);
 }
 
 async function updateManagementPanel(guild, state) {
@@ -173,68 +257,117 @@ async function updateManagementPanel(guild, state) {
     if (!channel) return;
 
     try {
-        const msg = await channel.messages.fetch(state.managementMessageId);
-        if (!msg) return;
+        const message = await channel.messages.fetch(state.managementMessageId);
+        if (!message) return;
 
-        await msg.edit({
-            embeds: buildManagementEmbeds(state),
-            components: buildManagementComponents(state)
+        if (state.status === 'IDLE') {
+            await message.edit({
+                embeds: [buildIdleEmbed()],
+                components: buildManageComponents(state)
+            });
+            return;
+        }
+
+        await message.edit({
+            embeds: [buildMainEmbed(state), buildLogsEmbed(state)],
+            components: buildManageComponents(state)
         });
-    } catch (err) {
-        console.error('Failed to update management panel:', err);
+    } catch (error) {
+        console.error('Failed to update management panel:', error);
     }
 }
 
-async function updateSessionMessage(guild, state) {
-    if (!state.sessionMessageId || !state.sessionChannelId) return;
+async function updateMainMessage(guild, state) {
+    if (!state.mainMessageId || !state.sessionChannelId) return;
 
     const channel = guild.channels.cache.get(state.sessionChannelId);
     if (!channel) return;
 
     try {
-        const msg = await channel.messages.fetch(state.sessionMessageId);
-        if (!msg) return;
-
-        await msg.edit({
-            embeds: [buildSessionEmbed(state)]
-        });
-    } catch (err) {
-        console.error('Failed to update session message:', err);
+        const message = await channel.messages.fetch(state.mainMessageId);
+        if (!message) return;
+        await message.edit({ embeds: [buildMainEmbed(state)] });
+    } catch (error) {
+        console.error('Failed to update main session message:', error);
     }
 }
 
-async function startSession(guild, state) {
-    if (state.started || state.joinedUsers.size < MAX_MEMBERS) return;
+async function notifyQueuePromotion(guild, userId) {
+    const channelId = config.channels.queueNotification;
+    if (!channelId) return;
 
-    state.started = true;
-    state.status = 'ACTIVE';
+    const channel = guild.channels.cache.get(channelId);
+    if (!channel) return;
 
-    addSessionLog(state, `Session automatically started with ${MAX_MEMBERS} members`);
+    await channel.send({
+        content: `<@${userId}> a session spot opened and you have been added to the session.`
+    }).catch(console.error);
+}
 
-    const channel = guild.channels.cache.get(state.sessionChannelId);
-    if (channel) {
-        const memberMentions = Array.from(state.joinedUsers).map(id => `<@${id}>`).join(' ');
-        await channel.send({
-            content: `${memberMentions}\nYour mafia session is now starting. You were the first ${MAX_MEMBERS} to join.`
-        }).catch(console.error);
-    }
+function removeFromQueue(state, userId) {
+    state.queuedMembers = state.queuedMembers.filter(id => id !== userId);
+}
 
-    await updateSessionMessage(guild, state);
+async function fillOpenSlotFromQueue(guild, state) {
+    if (state.activeMembers.size >= MAX_MEMBERS) return;
+    if (state.queuedMembers.length === 0) return;
+
+    const nextUserId = state.queuedMembers.shift();
+    if (!nextUserId) return;
+
+    state.activeMembers.add(nextUserId);
+    state.allJoinedMembers.add(nextUserId);
+    addSessionLog(state, `${queueEmoji()} <@${nextUserId}> was moved from the queue into the session`);
+
+    await notifyQueuePromotion(guild, nextUserId);
+    await updateMainMessage(guild, state);
     await updateManagementPanel(guild, state);
-    await logToChannel(guild, 'Mafia Session Started', `Session started automatically with ${MAX_MEMBERS} members.`, EMBED_COLOR);
+
+    await logToChannel(
+        guild,
+        'Queue Promotion',
+        `<@${nextUserId}> was moved from the queue into the session.`,
+        EMBED_COLOR
+    );
 }
 
-async function resetSession(guildId) {
-    const state = getOrInitState(guildId);
+async function cleanupSessionChannelMessages(guild, state) {
+    const channel = guild.channels.cache.get(state.sessionChannelId);
+    if (!channel) return;
 
-    state.sessionMessageId = null;
-    state.sessionChannelId = null;
-    state.hostId = null;
-    state.startTime = null;
-    state.status = 'IDLE';
-    state.joinedUsers.clear();
-    state.sessionLogs = [];
-    state.started = false;
+    const idsToDelete = [...new Set([...state.auxMessageIds, ...state.boostMessageIds, ...state.fullMessageIds])];
+
+    for (const id of idsToDelete) {
+        try {
+            const msg = await channel.messages.fetch(id);
+            if (msg) await msg.delete();
+        } catch (error) {
+            // ignore missing/deleted messages
+        }
+    }
+}
+
+function resetStateButKeepPanel(guildId) {
+    const old = getOrInitState(guildId);
+
+    old.mainMessageId = null;
+    old.sessionChannelId = null;
+    old.hostId = null;
+    old.startTime = null;
+    old.status = 'IDLE';
+
+    old.activeMembers.clear();
+    old.queuedMembers = [];
+    old.allJoinedMembers.clear();
+    old.removedMembers.clear();
+
+    old.sessionLogs = [];
+
+    old.boostMessageIds = [];
+    old.fullMessageIds = [];
+    old.auxMessageIds = [];
+
+    old.ended = false;
 }
 
 module.exports = {
@@ -257,10 +390,17 @@ module.exports = {
 
         const state = getOrInitState(interaction.guildId);
 
-        await interaction.reply({
-            embeds: buildManagementEmbeds(state),
-            components: buildManagementComponents(state)
-        });
+        if (state.status === 'IDLE') {
+            await interaction.reply({
+                embeds: [buildIdleEmbed()],
+                components: buildManageComponents(state)
+            });
+        } else {
+            await interaction.reply({
+                embeds: [buildMainEmbed(state), buildLogsEmbed(state)],
+                components: buildManageComponents(state)
+            });
+        }
 
         const msg = await interaction.fetchReply();
         state.managementMessageId = msg.id;
@@ -271,80 +411,162 @@ module.exports = {
         const state = getOrInitState(interaction.guildId);
 
         if (interaction.isStringSelectMenu() && interaction.customId === 'session_manage_menu') {
-            if (!hasCommandAccess(interaction.member) && !hasSlotAccess(interaction.member)) {
-                return interaction.reply({
-                    content: 'You do not have permission to use this menu.',
-                    ephemeral: true
-                });
-            }
-
             const selected = interaction.values[0];
 
             if (selected === 'host_session') {
                 if (!hasCommandAccess(interaction.member)) {
                     return interaction.reply({
-                        content: 'Only command access can host a session.',
+                        content: 'You do not have permission to host sessions.',
                         ephemeral: true
                     });
                 }
 
                 if (state.status !== 'IDLE') {
                     return interaction.reply({
-                        content: 'There is already an active or pending session.',
+                        content: 'There is already an active session.',
                         ephemeral: true
                     });
                 }
 
-                const sessionChannel = interaction.guild.channels.cache.get(config.channels.sessionAnnouncement);
-                if (!sessionChannel) {
+                const channel = interaction.guild.channels.cache.get(config.channels.sessionAnnouncement);
+                if (!channel) {
                     return interaction.reply({
-                        content: 'Session announcement channel is not configured correctly.',
+                        content: 'Session announcement channel is not configured.',
                         ephemeral: true
                     });
                 }
 
                 state.hostId = interaction.user.id;
                 state.startTime = Math.floor(Date.now() / 1000);
-                state.status = 'SIGNUPS';
-                state.joinedUsers.clear();
-                state.sessionLogs = [];
-                state.started = false;
+                state.status = 'ACTIVE';
+                state.ended = false;
 
-                addSessionLog(state, `Session hosted by <@${interaction.user.id}>`);
+                addSessionLog(state, `${logEmoji()} Session was started by <@${interaction.user.id}>`);
 
-                const sessionMsg = await sessionChannel.send({
-                    embeds: [buildSessionEmbed(state)]
+                const mainMessage = await channel.send({
+                    embeds: [buildMainEmbed(state)]
                 });
 
-                await sessionMsg.react(JOIN_EMOJI);
+                await mainMessage.react(JOIN_EMOJI);
 
-                state.sessionMessageId = sessionMsg.id;
-                state.sessionChannelId = sessionChannel.id;
+                state.mainMessageId = mainMessage.id;
+                state.sessionChannelId = channel.id;
 
                 await interaction.update({
-                    embeds: buildManagementEmbeds(state),
-                    components: buildManagementComponents(state)
+                    embeds: [buildMainEmbed(state), buildLogsEmbed(state)],
+                    components: buildManageComponents(state)
                 });
 
                 await logToChannel(
                     interaction.guild,
-                    'Mafia Session Hosted',
-                    `Session hosted by <@${interaction.user.id}>.`,
+                    'Session Started',
+                    `Session started by <@${interaction.user.id}>.\nMessage: ${mainMessage.url}`,
                     EMBED_COLOR
                 );
+
+                return;
             }
 
-            else if (selected === 'add_member') {
-                if (!hasSlotAccess(interaction.member)) {
+            if (state.status === 'IDLE') {
+                return interaction.reply({
+                    content: 'There is no active session.',
+                    ephemeral: true
+                });
+            }
+
+            if (selected === 'post_boost') {
+                if (!hasCommandAccess(interaction.member)) {
                     return interaction.reply({
-                        content: 'You do not have permission to add members.',
+                        content: 'You do not have permission to post boost messages.',
                         ephemeral: true
                     });
                 }
 
-                if (state.status === 'IDLE') {
+                const channel = interaction.guild.channels.cache.get(state.sessionChannelId);
+                if (!channel) {
                     return interaction.reply({
-                        content: 'There is no active session.',
+                        content: 'Session channel not found.',
+                        ephemeral: true
+                    });
+                }
+
+                const boostMsg = await channel.send({
+                    content: `<@&${config.roles.sessionPing}> slots are available for the active session. React with ${JOIN_EMOJI} to claim an open slot.`,
+                    allowedMentions: { parse: ['roles'] }
+                });
+
+                await boostMsg.react(JOIN_EMOJI);
+
+                state.boostMessageIds.push(boostMsg.id);
+                state.auxMessageIds.push(boostMsg.id);
+
+                addSessionLog(state, `${boostEmoji()} Session boost message was posted`);
+
+                await updateManagementPanel(interaction.guild, state);
+
+                await interaction.update({
+                    embeds: [buildMainEmbed(state), buildLogsEmbed(state)],
+                    components: buildManageComponents(state)
+                });
+
+                await logToChannel(
+                    interaction.guild,
+                    'Boost Message Posted',
+                    `Boost message posted by <@${interaction.user.id}>.`,
+                    EMBED_COLOR
+                );
+
+                return;
+            }
+
+            if (selected === 'post_full') {
+                if (!hasCommandAccess(interaction.member)) {
+                    return interaction.reply({
+                        content: 'You do not have permission to post the full message.',
+                        ephemeral: true
+                    });
+                }
+
+                const channel = interaction.guild.channels.cache.get(state.sessionChannelId);
+                if (!channel) {
+                    return interaction.reply({
+                        content: 'Session channel not found.',
+                        ephemeral: true
+                    });
+                }
+
+                const fullMsg = await channel.send({
+                    content: `The session is currently full. React with ${QUEUE_EMOJI} to join the queue.`
+                });
+
+                await fullMsg.react(QUEUE_EMOJI);
+
+                state.fullMessageIds.push(fullMsg.id);
+                state.auxMessageIds.push(fullMsg.id);
+
+                addSessionLog(state, `${fullEmoji()} Session full message was posted`);
+
+                await updateManagementPanel(interaction.guild, state);
+
+                await interaction.update({
+                    embeds: [buildMainEmbed(state), buildLogsEmbed(state)],
+                    components: buildManageComponents(state)
+                });
+
+                await logToChannel(
+                    interaction.guild,
+                    'Full Message Posted',
+                    `Slots full message posted by <@${interaction.user.id}>.`,
+                    EMBED_COLOR
+                );
+
+                return;
+            }
+
+            if (selected === 'add_member') {
+                if (!hasSlotAccess(interaction.member)) {
+                    return interaction.reply({
+                        content: 'You do not have permission to add members.',
                         ephemeral: true
                     });
                 }
@@ -364,17 +586,10 @@ module.exports = {
                 });
             }
 
-            else if (selected === 'remove_member') {
+            if (selected === 'remove_member') {
                 if (!hasSlotAccess(interaction.member)) {
                     return interaction.reply({
                         content: 'You do not have permission to remove members.',
-                        ephemeral: true
-                    });
-                }
-
-                if (state.status === 'IDLE') {
-                    return interaction.reply({
-                        content: 'There is no active session.',
                         ephemeral: true
                     });
                 }
@@ -394,36 +609,47 @@ module.exports = {
                 });
             }
 
-            else if (selected === 'end_session') {
+            if (selected === 'shutdown_session') {
                 if (!hasCommandAccess(interaction.member)) {
                     return interaction.reply({
-                        content: 'Only command access can end a session.',
+                        content: 'You do not have permission to shut down sessions.',
                         ephemeral: true
                     });
                 }
 
-                if (state.status === 'IDLE') {
-                    return interaction.reply({
-                        content: 'There is no active session to end.',
-                        ephemeral: true
-                    });
+                const channel = interaction.guild.channels.cache.get(state.sessionChannelId);
+
+                await cleanupSessionChannelMessages(interaction.guild, state);
+
+                if (channel && state.mainMessageId) {
+                    try {
+                        const mainMsg = await channel.messages.fetch(state.mainMessageId);
+                        if (mainMsg) {
+                            await mainMsg.reply({
+                                content: 'Session has ended.'
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Failed to reply to main session message on shutdown:', error);
+                    }
                 }
 
-                const oldHost = state.hostId;
-                await resetSession(interaction.guildId);
-                await updateManagementPanel(interaction.guild, getOrInitState(interaction.guildId));
-
-                await interaction.update({
-                    embeds: buildManagementEmbeds(getOrInitState(interaction.guildId)),
-                    components: buildManagementComponents(getOrInitState(interaction.guildId))
-                });
-
+                await logSessionEndedSummary(interaction.guild, state);
                 await logToChannel(
                     interaction.guild,
-                    'Mafia Session Ended',
-                    `Session ended by <@${interaction.user.id}>. Hosted by <@${oldHost}>.`,
+                    'Session Shutdown',
+                    `Session shut down by <@${interaction.user.id}>.`,
                     EMBED_COLOR
                 );
+
+                resetStateButKeepPanel(interaction.guildId);
+
+                await interaction.update({
+                    embeds: [buildIdleEmbed()],
+                    components: buildManageComponents(getOrInitState(interaction.guildId))
+                });
+
+                return;
             }
         }
 
@@ -438,43 +664,43 @@ module.exports = {
             const state = getOrInitState(interaction.guildId);
             const targetId = interaction.values[0];
 
-            if (interaction.customId === 'session_add_member_user') {
-                if (state.status === 'IDLE') {
-                    return interaction.update({
-                        content: 'There is no active session.',
-                        components: []
-                    });
-                }
+            if (state.status === 'IDLE') {
+                return interaction.update({
+                    content: 'There is no active session.',
+                    components: []
+                });
+            }
 
-                if (state.joinedUsers.has(targetId)) {
+            if (interaction.customId === 'session_add_member_user') {
+                if (state.activeMembers.has(targetId)) {
                     return interaction.update({
                         content: `<@${targetId}> is already in the session.`,
                         components: []
                     });
                 }
 
-                if (state.joinedUsers.size >= MAX_MEMBERS) {
+                if (state.activeMembers.size >= MAX_MEMBERS) {
                     return interaction.update({
-                        content: `The session is already full (${MAX_MEMBERS}/${MAX_MEMBERS}).`,
+                        content: `The session is full (${MAX_MEMBERS}/${MAX_MEMBERS}).`,
                         components: []
                     });
                 }
 
-                state.joinedUsers.add(targetId);
-                addSessionLog(state, `<@${interaction.user.id}> manually added <@${targetId}>`);
+                removeFromQueue(state, targetId);
+                state.activeMembers.add(targetId);
+                state.allJoinedMembers.add(targetId);
 
-                await updateSessionMessage(interaction.guild, state);
+                addSessionLog(state, `${logEmoji()} <@${interaction.user.id}> added <@${targetId}> to the session`);
+
+                await updateMainMessage(interaction.guild, state);
                 await updateManagementPanel(interaction.guild, state);
+
                 await logToChannel(
                     interaction.guild,
                     'Session Member Added',
                     `<@${interaction.user.id}> added <@${targetId}> to the session.`,
                     EMBED_COLOR
                 );
-
-                if (state.joinedUsers.size === MAX_MEMBERS && !state.started) {
-                    await startSession(interaction.guild, state);
-                }
 
                 return interaction.update({
                     content: `<@${targetId}> was added to the session.`,
@@ -483,25 +709,22 @@ module.exports = {
             }
 
             if (interaction.customId === 'session_remove_member_user') {
-                if (state.status === 'IDLE') {
-                    return interaction.update({
-                        content: 'There is no active session.',
-                        components: []
-                    });
-                }
-
-                if (!state.joinedUsers.has(targetId)) {
+                if (!state.activeMembers.has(targetId)) {
                     return interaction.update({
                         content: `<@${targetId}> is not in the session.`,
                         components: []
                     });
                 }
 
-                state.joinedUsers.delete(targetId);
-                addSessionLog(state, `<@${interaction.user.id}> manually removed <@${targetId}>`);
+                state.activeMembers.delete(targetId);
+                state.removedMembers.add(targetId);
 
-                await updateSessionMessage(interaction.guild, state);
+                addSessionLog(state, `${logEmoji()} <@${interaction.user.id}> removed <@${targetId}> from the session`);
+
+                await fillOpenSlotFromQueue(interaction.guild, state);
+                await updateMainMessage(interaction.guild, state);
                 await updateManagementPanel(interaction.guild, state);
+
                 await logToChannel(
                     interaction.guild,
                     'Session Member Removed',
@@ -525,36 +748,60 @@ module.exports = {
         }
 
         const message = reaction.message;
+        if (!message.guild) return;
+
         const state = getOrInitState(message.guild.id);
+        if (state.status === 'IDLE') return;
 
-        if (!state.sessionMessageId || message.id !== state.sessionMessageId) return;
-        if (reaction.emoji.name !== JOIN_EMOJI) return;
-        if (state.status !== 'SIGNUPS' && state.status !== 'ACTIVE') return;
+        const emojiName = reaction.emoji.name;
 
-        if (state.joinedUsers.has(user.id)) return;
+        // Main session embed or boost messages = claim open slot
+        const isJoinMessage =
+            message.id === state.mainMessageId ||
+            state.boostMessageIds.includes(message.id);
 
-        if (state.joinedUsers.size >= MAX_MEMBERS) {
-            try {
-                await reaction.users.remove(user.id);
-            } catch (err) {
-                console.error('Failed to remove extra reaction:', err);
+        if (isJoinMessage && emojiName === JOIN_EMOJI) {
+            if (state.activeMembers.has(user.id)) return;
+
+            if (state.activeMembers.size >= MAX_MEMBERS) {
+                try {
+                    await reaction.users.remove(user.id);
+                } catch (error) {
+                    console.error('Failed to remove join reaction from full session:', error);
+                }
+                return;
             }
 
-            await message.channel.send({
-                content: `<@${user.id}> This mafia session is full. Max is ${MAX_MEMBERS}.`
-            }).catch(console.error);
+            removeFromQueue(state, user.id);
+            state.activeMembers.add(user.id);
+            state.allJoinedMembers.add(user.id);
 
+            addSessionLog(state, `${logEmoji()} <@${user.id}> joined the session`);
+
+            await updateMainMessage(message.guild, state);
+            await updateManagementPanel(message.guild, state);
             return;
         }
 
-        state.joinedUsers.add(user.id);
-        addSessionLog(state, `<@${user.id}> joined the session by reaction`);
+        // Full messages = queue
+        const isQueueMessage = state.fullMessageIds.includes(message.id);
 
-        await updateSessionMessage(message.guild, state);
-        await updateManagementPanel(message.guild, state);
+        if (isQueueMessage && emojiName === QUEUE_EMOJI) {
+            if (state.activeMembers.has(user.id)) {
+                try {
+                    await reaction.users.remove(user.id);
+                } catch (error) {
+                    console.error('Failed to remove queue reaction for active member:', error);
+                }
+                return;
+            }
 
-        if (state.joinedUsers.size === MAX_MEMBERS && !state.started) {
-            await startSession(message.guild, state);
+            if (state.queuedMembers.includes(user.id)) return;
+
+            state.queuedMembers.push(user.id);
+            addSessionLog(state, `${queueEmoji()} <@${user.id}> joined the queue`);
+
+            await updateManagementPanel(message.guild, state);
         }
     },
 
@@ -566,16 +813,40 @@ module.exports = {
         }
 
         const message = reaction.message;
+        if (!message.guild) return;
+
         const state = getOrInitState(message.guild.id);
+        if (state.status === 'IDLE') return;
 
-        if (!state.sessionMessageId || message.id !== state.sessionMessageId) return;
-        if (reaction.emoji.name !== JOIN_EMOJI) return;
-        if (!state.joinedUsers.has(user.id)) return;
+        const emojiName = reaction.emoji.name;
 
-        state.joinedUsers.delete(user.id);
-        addSessionLog(state, `<@${user.id}> left the session`);
+        const isJoinMessage =
+            message.id === state.mainMessageId ||
+            state.boostMessageIds.includes(message.id);
 
-        await updateSessionMessage(message.guild, state);
-        await updateManagementPanel(message.guild, state);
+        if (isJoinMessage && emojiName === JOIN_EMOJI) {
+            if (!state.activeMembers.has(user.id)) return;
+
+            state.activeMembers.delete(user.id);
+            state.removedMembers.add(user.id);
+
+            addSessionLog(state, `${logEmoji()} <@${user.id}> left the session`);
+
+            await fillOpenSlotFromQueue(message.guild, state);
+            await updateMainMessage(message.guild, state);
+            await updateManagementPanel(message.guild, state);
+            return;
+        }
+
+        const isQueueMessage = state.fullMessageIds.includes(message.id);
+
+        if (isQueueMessage && emojiName === QUEUE_EMOJI) {
+            if (!state.queuedMembers.includes(user.id)) return;
+
+            removeFromQueue(state, user.id);
+            addSessionLog(state, `${queueEmoji()} <@${user.id}> left the queue`);
+
+            await updateManagementPanel(message.guild, state);
+        }
     }
 };
