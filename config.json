@@ -1,13 +1,25 @@
 {
+  "embedColor": "#111111",
   "channels": {
     "sessionAnnouncement": "1472984863110860993",
-    "actionLog": "1481003383795093595"
+    "actionLog": "1481003383795093595",
+    "queueNotification": "1472984863110860993",
+    "sessionEndLog": "1481003383795093595"
   },
   "roles": {
     "commandAccess": "1456262798190448787",
-    "sessionSlotManager": "1456262798190448787"
+    "sessionSlotManager": "1456262798190448787",
+    "sessionPing": "1456262798190448787"
+  },
+  "reactions": {
+    "join": "✅",
+    "queue": "📋"
   },
   "emojis": {
-    "mafia": "🔫"
+    "session": "✅",
+    "log": "✅",
+    "boost": "✅",
+    "full": "✅",
+    "queue": "✅"
   }
 }
