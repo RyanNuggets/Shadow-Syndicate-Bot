@@ -12,6 +12,7 @@ const sessionState = new Map();
 
 const EMBED_COLOR = config.embedColor || '#111111';
 const MAX_MEMBERS = 6;
+const MIN_MEMBERS = 4;
 const JOIN_EMOJI = config.reactions?.join || '✅';
 const QUEUE_EMOJI = config.reactions?.queue || '📋';
 
@@ -35,9 +36,7 @@ function getOrInitState(guildId) {
 
             boostMessageIds: [],
             fullMessageIds: [],
-            auxMessageIds: [],
-
-            ended: false
+            auxMessageIds: []
         });
     }
 
@@ -100,12 +99,51 @@ function addSessionLog(state, message) {
 
 function getStatusText(state) {
     if (state.status === 'IDLE') return 'No Session';
-    if (state.activeMembers.size === 0) return 'Starting Soon';
     if (state.activeMembers.size >= MAX_MEMBERS) return 'Full';
+    if (state.activeMembers.size >= MIN_MEMBERS) return 'On Going';
+    if (state.activeMembers.size > 0) return 'Starting Soon';
     return 'Available Slots';
 }
 
-function buildMainEmbed(state) {
+function buildHostedInfoEmbed(state) {
+    return new EmbedBuilder()
+        .setColor(EMBED_COLOR)
+        .setDescription(
+            `## ${sessionEmoji()} Mafia Session Hosting\n` +
+            `A session is being hosted by <@${state.hostId}>! The session is now available for members to join.\n` +
+            `**\`-\`** A minimum of ${MIN_MEMBERS} members and a maximum of ${MAX_MEMBERS} members.\n` +
+            `**\`-\`** Arrive prepared with your uniforms, weapons, and vehicles ready before the session starts.\n` +
+            `**\`-\`** First come, first serve.\n`
+        );
+}
+
+function buildHostedStatusEmbed(state) {
+    return new EmbedBuilder()
+        .setColor(EMBED_COLOR)
+        .setDescription(
+            `## Session Status\n` +
+            `**Last Updated:** ${getRelativeTimestamp(Math.floor(Date.now() / 1000))}`
+        )
+        .addFields(
+            {
+                name: 'Available Slots',
+                value: `\`\`\`${state.activeMembers.size}/${MAX_MEMBERS}\`\`\``,
+                inline: true
+            },
+            {
+                name: 'Active Since',
+                value: `\`\`\`${getRelativeTimestamp(state.startTime)}\`\`\``,
+                inline: true
+            },
+            {
+                name: 'Status',
+                value: `\`\`\`${getStatusText(state)}\`\`\``,
+                inline: true
+            }
+        );
+}
+
+function buildCommandMainEmbed(state) {
     return new EmbedBuilder()
         .setColor(EMBED_COLOR)
         .setDescription(
@@ -269,7 +307,7 @@ async function updateManagementPanel(guild, state) {
         }
 
         await message.edit({
-            embeds: [buildMainEmbed(state), buildLogsEmbed(state)],
+            embeds: [buildCommandMainEmbed(state), buildLogsEmbed(state)],
             components: buildManageComponents(state)
         });
     } catch (error) {
@@ -286,7 +324,12 @@ async function updateMainMessage(guild, state) {
     try {
         const message = await channel.messages.fetch(state.mainMessageId);
         if (!message) return;
-        await message.edit({ embeds: [buildMainEmbed(state)] });
+
+        await message.edit({
+            content: `<@&${config.roles.sessionPing}>`,
+            embeds: [buildHostedInfoEmbed(state), buildHostedStatusEmbed(state)],
+            allowedMentions: { parse: ['roles'] }
+        });
     } catch (error) {
         console.error('Failed to update main session message:', error);
     }
@@ -317,7 +360,24 @@ async function fillOpenSlotFromQueue(guild, state) {
 
     state.activeMembers.add(nextUserId);
     state.allJoinedMembers.add(nextUserId);
-    addSessionLog(state, `${queueEmoji()} <@${nextUserId}> was moved from the queue into the session`);
+    addSessionLog(state, `<@${nextUserId}> was moved from the queue into the session`);
+
+    const channel = guild.channels.cache.get(state.sessionChannelId);
+    if (channel) {
+        for (const msgId of state.fullMessageIds) {
+            try {
+                const msg = await channel.messages.fetch(msgId);
+                if (!msg) continue;
+
+                const reaction = msg.reactions.cache.find(r => r.emoji.name === QUEUE_EMOJI);
+                if (reaction) {
+                    await reaction.users.remove(nextUserId).catch(() => {});
+                }
+            } catch (error) {
+                // ignore
+            }
+        }
+    }
 
     await notifyQueuePromotion(guild, nextUserId);
     await updateMainMessage(guild, state);
@@ -342,7 +402,7 @@ async function cleanupSessionChannelMessages(guild, state) {
             const msg = await channel.messages.fetch(id);
             if (msg) await msg.delete();
         } catch (error) {
-            // ignore missing/deleted messages
+            // ignore
         }
     }
 }
@@ -362,12 +422,9 @@ function resetStateButKeepPanel(guildId) {
     old.removedMembers.clear();
 
     old.sessionLogs = [];
-
     old.boostMessageIds = [];
     old.fullMessageIds = [];
     old.auxMessageIds = [];
-
-    old.ended = false;
 }
 
 module.exports = {
@@ -397,7 +454,7 @@ module.exports = {
             });
         } else {
             await interaction.reply({
-                embeds: [buildMainEmbed(state), buildLogsEmbed(state)],
+                embeds: [buildCommandMainEmbed(state), buildLogsEmbed(state)],
                 components: buildManageComponents(state)
             });
         }
@@ -439,12 +496,13 @@ module.exports = {
                 state.hostId = interaction.user.id;
                 state.startTime = Math.floor(Date.now() / 1000);
                 state.status = 'ACTIVE';
-                state.ended = false;
 
-                addSessionLog(state, `${logEmoji()} Session was started by <@${interaction.user.id}>`);
+                addSessionLog(state, `Session was started by <@${interaction.user.id}>`);
 
                 const mainMessage = await channel.send({
-                    embeds: [buildMainEmbed(state)]
+                    content: `<@&${config.roles.sessionPing}>`,
+                    embeds: [buildHostedInfoEmbed(state), buildHostedStatusEmbed(state)],
+                    allowedMentions: { parse: ['roles'] }
                 });
 
                 await mainMessage.react(JOIN_EMOJI);
@@ -453,7 +511,7 @@ module.exports = {
                 state.sessionChannelId = channel.id;
 
                 await interaction.update({
-                    embeds: [buildMainEmbed(state), buildLogsEmbed(state)],
+                    embeds: [buildCommandMainEmbed(state), buildLogsEmbed(state)],
                     components: buildManageComponents(state)
                 });
 
@@ -490,8 +548,17 @@ module.exports = {
                     });
                 }
 
+                const boostEmbed = new EmbedBuilder()
+                    .setColor(EMBED_COLOR)
+                    .setDescription(
+                        `## ${boostEmoji()} Session Boost\n` +
+                        `Slots are currently available for the active session.\n` +
+                        `React with ${JOIN_EMOJI} below to claim an open slot.`
+                    );
+
                 const boostMsg = await channel.send({
-                    content: `<@&${config.roles.sessionPing}> slots are available for the active session. React with ${JOIN_EMOJI} to claim an open slot.`,
+                    content: `<@&${config.roles.sessionPing}>`,
+                    embeds: [boostEmbed],
                     allowedMentions: { parse: ['roles'] }
                 });
 
@@ -500,12 +567,12 @@ module.exports = {
                 state.boostMessageIds.push(boostMsg.id);
                 state.auxMessageIds.push(boostMsg.id);
 
-                addSessionLog(state, `${boostEmoji()} Session boost message was posted`);
+                addSessionLog(state, `Session boost message was posted`);
 
                 await updateManagementPanel(interaction.guild, state);
 
                 await interaction.update({
-                    embeds: [buildMainEmbed(state), buildLogsEmbed(state)],
+                    embeds: [buildCommandMainEmbed(state), buildLogsEmbed(state)],
                     components: buildManageComponents(state)
                 });
 
@@ -535,8 +602,16 @@ module.exports = {
                     });
                 }
 
+                const fullEmbed = new EmbedBuilder()
+                    .setColor(EMBED_COLOR)
+                    .setDescription(
+                        `## ${fullEmoji()} Session Full\n` +
+                        `The session is currently full.\n` +
+                        `React with ${QUEUE_EMOJI} below to join the queue for the next available spot.`
+                    );
+
                 const fullMsg = await channel.send({
-                    content: `The session is currently full. React with ${QUEUE_EMOJI} to join the queue.`
+                    embeds: [fullEmbed]
                 });
 
                 await fullMsg.react(QUEUE_EMOJI);
@@ -544,12 +619,12 @@ module.exports = {
                 state.fullMessageIds.push(fullMsg.id);
                 state.auxMessageIds.push(fullMsg.id);
 
-                addSessionLog(state, `${fullEmoji()} Session full message was posted`);
+                addSessionLog(state, `Session full message was posted`);
 
                 await updateManagementPanel(interaction.guild, state);
 
                 await interaction.update({
-                    embeds: [buildMainEmbed(state), buildLogsEmbed(state)],
+                    embeds: [buildCommandMainEmbed(state), buildLogsEmbed(state)],
                     components: buildManageComponents(state)
                 });
 
@@ -690,7 +765,7 @@ module.exports = {
                 state.activeMembers.add(targetId);
                 state.allJoinedMembers.add(targetId);
 
-                addSessionLog(state, `${logEmoji()} <@${interaction.user.id}> added <@${targetId}> to the session`);
+                addSessionLog(state, `<@${interaction.user.id}> added <@${targetId}> to the session`);
 
                 await updateMainMessage(interaction.guild, state);
                 await updateManagementPanel(interaction.guild, state);
@@ -719,7 +794,7 @@ module.exports = {
                 state.activeMembers.delete(targetId);
                 state.removedMembers.add(targetId);
 
-                addSessionLog(state, `${logEmoji()} <@${interaction.user.id}> removed <@${targetId}> from the session`);
+                addSessionLog(state, `<@${interaction.user.id}> removed <@${targetId}> from the session`);
 
                 await fillOpenSlotFromQueue(interaction.guild, state);
                 await updateMainMessage(interaction.guild, state);
@@ -755,7 +830,6 @@ module.exports = {
 
         const emojiName = reaction.emoji.name;
 
-        // Main session embed or boost messages = claim open slot
         const isJoinMessage =
             message.id === state.mainMessageId ||
             state.boostMessageIds.includes(message.id);
@@ -776,14 +850,13 @@ module.exports = {
             state.activeMembers.add(user.id);
             state.allJoinedMembers.add(user.id);
 
-            addSessionLog(state, `${logEmoji()} <@${user.id}> joined the session`);
+            addSessionLog(state, `<@${user.id}> joined the session`);
 
             await updateMainMessage(message.guild, state);
             await updateManagementPanel(message.guild, state);
             return;
         }
 
-        // Full messages = queue
         const isQueueMessage = state.fullMessageIds.includes(message.id);
 
         if (isQueueMessage && emojiName === QUEUE_EMOJI) {
@@ -799,7 +872,7 @@ module.exports = {
             if (state.queuedMembers.includes(user.id)) return;
 
             state.queuedMembers.push(user.id);
-            addSessionLog(state, `${queueEmoji()} <@${user.id}> joined the queue`);
+            addSessionLog(state, `<@${user.id}> joined the queue`);
 
             await updateManagementPanel(message.guild, state);
         }
@@ -830,7 +903,7 @@ module.exports = {
             state.activeMembers.delete(user.id);
             state.removedMembers.add(user.id);
 
-            addSessionLog(state, `${logEmoji()} <@${user.id}> left the session`);
+            addSessionLog(state, `<@${user.id}> left the session`);
 
             await fillOpenSlotFromQueue(message.guild, state);
             await updateMainMessage(message.guild, state);
@@ -844,7 +917,7 @@ module.exports = {
             if (!state.queuedMembers.includes(user.id)) return;
 
             removeFromQueue(state, user.id);
-            addSessionLog(state, `${queueEmoji()} <@${user.id}> left the queue`);
+            addSessionLog(state, `<@${user.id}> left the queue`);
 
             await updateManagementPanel(message.guild, state);
         }
