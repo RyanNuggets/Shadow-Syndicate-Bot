@@ -1,26 +1,13 @@
 {
-    "token": "MTQ1MDE0NjMzMDQ3ODY0NTMwOQ.GBQO20.RIsTglewr42n1FLHzbQD8dNVylt81sQYlXq8Rw",
-    "clientId": "1450144688832118946",
-    "guildId": "1131728085650243604",
-    "serverKey": "bqeLquAxxhwJkFkXflDL-VAAmjUPXguBrZcQJoyTUVhZTgrfysczhbGEwWJEl",
-    "channels": {
-        "pollAnnouncement": "1447635662147813467",
-        "adminNotification": "1450149498432131082",
-        "actionLog": "1450149498432131082"
-    },
-    "roles": {
-        "pollPing": "1447706606614741113",
-        "voteReachedPing": "1447635544594186443",
-        "sessionPing": "1447706606614741113",
-        "commandAccess": "1450197483845193790"
-    },
-    "emojis": {
-        "crpc": "<:CRPC:1448346865505665125>",
-        "arrow": "<:rightarrow:1449034297767100531>"
-    },
-    "images": {
-        "startup": "https://media.discordapp.net/attachments/1437715926215557180/1450163340189110362/crpc_banner2_3.png?ex=6941895b&is=694037db&hm=8ff8882d5d20ee730669a571b073e4374e65745de81dfdb60e814b36ee8914ca&=&format=webp&quality=lossless",
-        "shutdown": "https://media.discordapp.net/attachments/1437715926215557180/1450163976162906174/crpc_banner2_4.png?ex=694189f2&is=69403872&hm=f11fa6277f9e224a642ccd2b9915738983e865a49691f8bf920467da294b2c2f&=&format=webp&quality=lossless"
-    }
+  "channels": {
+    "sessionAnnouncement": "1472984863110860993",
+    "actionLog": "1481003383795093595"
+  },
+  "roles": {
+    "commandAccess": "1456262798190448787",
+    "sessionSlotManager": "1456262798190448787"
+  },
+  "emojis": {
+    "mafia": "🔫"
+  }
 }
-
