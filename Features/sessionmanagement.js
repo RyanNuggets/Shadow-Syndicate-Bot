@@ -105,7 +105,7 @@ function buildHostedInfoEmbed(state) {
         .setColor(EMBED_COLOR)
         .setDescription(
             `## ${sessionEmoji()} Mafia Session Hosting\n` +
-            `A session is being hosted by <@${state.hostId}>! The session is now available for members to join.\n` +
+            `A session is being hosted by <@${state.hostId}>! The session is now available for members to join.\n\n` +
             `**\`-\`** A minimum of ${MIN_MEMBERS} members and a maximum of ${MAX_MEMBERS} members.\n` +
             `**\`-\`** Arrive prepared with your uniforms, weapons, and vehicles ready before the session starts.\n` +
             `**\`-\`** First come, first serve.\n`
@@ -701,7 +701,7 @@ module.exports = {
                         const mainMsg = await channel.messages.fetch(state.mainMessageId);
                         if (mainMsg) {
                             await mainMsg.reply({
-                                content: 'Session has ended.'
+                                content: 'This session has ended, thank you for joining.'
                             });
                         }
                     } catch (error) {
