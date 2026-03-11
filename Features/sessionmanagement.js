@@ -24,6 +24,7 @@ function getOrInitState(guildId) {
             managementMessageId: null,
             managementChannelId: null,
             hostId: null,
+            hostTag: null,
             startTime: null,
             status: 'IDLE',
 
@@ -70,10 +71,6 @@ function fullEmoji() {
     return config.emojis?.full || '⛔';
 }
 
-function queueEmoji() {
-    return config.emojis?.queue || '📋';
-}
-
 function getRelativeTimestamp(unix) {
     return `<t:${unix}:R>`;
 }
@@ -100,8 +97,6 @@ function addSessionLog(state, message) {
 function getStatusText(state) {
     if (state.status === 'IDLE') return 'No Session';
     if (state.activeMembers.size >= MAX_MEMBERS) return 'Full';
-    if (state.activeMembers.size >= MIN_MEMBERS) return 'On Going';
-    if (state.activeMembers.size > 0) return 'Starting Soon';
     return 'Available Slots';
 }
 
@@ -131,8 +126,8 @@ function buildHostedStatusEmbed(state) {
                 inline: true
             },
             {
-                name: 'Active Since',
-                value: `\`\`\`${getRelativeTimestamp(state.startTime)}\`\`\``,
+                name: 'Host',
+                value: `\`\`\`${state.hostTag || 'Unknown User'}\`\`\``,
                 inline: true
             },
             {
@@ -157,8 +152,8 @@ function buildCommandMainEmbed(state) {
                 inline: true
             },
             {
-                name: 'Active Since',
-                value: `${getRelativeTimestamp(state.startTime)}`,
+                name: 'Host',
+                value: `${state.hostTag || 'Unknown User'}`,
                 inline: true
             },
             {
@@ -351,6 +346,25 @@ function removeFromQueue(state, userId) {
     state.queuedMembers = state.queuedMembers.filter(id => id !== userId);
 }
 
+async function removeUserQueueReactions(guild, state, userId) {
+    const channel = guild.channels.cache.get(state.sessionChannelId);
+    if (!channel) return;
+
+    for (const msgId of state.fullMessageIds) {
+        try {
+            const msg = await channel.messages.fetch(msgId);
+            if (!msg) continue;
+
+            const reaction = msg.reactions.cache.find(r => r.emoji.name === QUEUE_EMOJI);
+            if (reaction) {
+                await reaction.users.remove(userId).catch(() => {});
+            }
+        } catch (error) {
+            // ignore
+        }
+    }
+}
+
 async function fillOpenSlotFromQueue(guild, state) {
     if (state.activeMembers.size >= MAX_MEMBERS) return;
     if (state.queuedMembers.length === 0) return;
@@ -362,23 +376,7 @@ async function fillOpenSlotFromQueue(guild, state) {
     state.allJoinedMembers.add(nextUserId);
     addSessionLog(state, `<@${nextUserId}> was moved from the queue into the session`);
 
-    const channel = guild.channels.cache.get(state.sessionChannelId);
-    if (channel) {
-        for (const msgId of state.fullMessageIds) {
-            try {
-                const msg = await channel.messages.fetch(msgId);
-                if (!msg) continue;
-
-                const reaction = msg.reactions.cache.find(r => r.emoji.name === QUEUE_EMOJI);
-                if (reaction) {
-                    await reaction.users.remove(nextUserId).catch(() => {});
-                }
-            } catch (error) {
-                // ignore
-            }
-        }
-    }
-
+    await removeUserQueueReactions(guild, state, nextUserId);
     await notifyQueuePromotion(guild, nextUserId);
     await updateMainMessage(guild, state);
     await updateManagementPanel(guild, state);
@@ -413,6 +411,7 @@ function resetStateButKeepPanel(guildId) {
     old.mainMessageId = null;
     old.sessionChannelId = null;
     old.hostId = null;
+    old.hostTag = null;
     old.startTime = null;
     old.status = 'IDLE';
 
@@ -494,6 +493,7 @@ module.exports = {
                 }
 
                 state.hostId = interaction.user.id;
+                state.hostTag = interaction.user.globalName || interaction.user.username;
                 state.startTime = Math.floor(Date.now() / 1000);
                 state.status = 'ACTIVE';
 
@@ -762,6 +762,8 @@ module.exports = {
                 }
 
                 removeFromQueue(state, targetId);
+                await removeUserQueueReactions(interaction.guild, state, targetId);
+
                 state.activeMembers.add(targetId);
                 state.allJoinedMembers.add(targetId);
 
@@ -819,7 +821,11 @@ module.exports = {
         if (user.bot) return;
 
         if (reaction.partial) {
-            try { await reaction.fetch(); } catch { return; }
+            try {
+                await reaction.fetch();
+            } catch {
+                return;
+            }
         }
 
         const message = reaction.message;
@@ -847,6 +853,8 @@ module.exports = {
             }
 
             removeFromQueue(state, user.id);
+            await removeUserQueueReactions(message.guild, state, user.id);
+
             state.activeMembers.add(user.id);
             state.allJoinedMembers.add(user.id);
 
@@ -882,7 +890,11 @@ module.exports = {
         if (user.bot) return;
 
         if (reaction.partial) {
-            try { await reaction.fetch(); } catch { return; }
+            try {
+                await reaction.fetch();
+            } catch {
+                return;
+            }
         }
 
         const message = reaction.message;
