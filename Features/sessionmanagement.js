@@ -27,6 +27,7 @@ function getOrInitState(guildId) {
             hostTag: null,
             startTime: null,
             status: 'IDLE',
+            displayStatus: null,
 
             activeMembers: new Set(),
             queuedMembers: [],
@@ -95,6 +96,7 @@ function addSessionLog(state, message) {
 }
 
 function getStatusText(state) {
+    if (state.displayStatus) return state.displayStatus;
     if (state.status === 'IDLE') return 'No Session';
     if (state.activeMembers.size >= MAX_MEMBERS) return 'Full';
     return 'Available Slots';
@@ -414,6 +416,7 @@ function resetStateButKeepPanel(guildId) {
     old.hostTag = null;
     old.startTime = null;
     old.status = 'IDLE';
+    old.displayStatus = null;
 
     old.activeMembers.clear();
     old.queuedMembers = [];
@@ -496,6 +499,7 @@ module.exports = {
                 state.hostTag = interaction.user.globalName || interaction.user.username;
                 state.startTime = Math.floor(Date.now() / 1000);
                 state.status = 'ACTIVE';
+                state.displayStatus = null;
 
                 addSessionLog(state, `Session was started by <@${interaction.user.id}>`);
 
@@ -693,6 +697,9 @@ module.exports = {
                 }
 
                 const channel = interaction.guild.channels.cache.get(state.sessionChannelId);
+
+                state.displayStatus = 'Ended';
+                await updateMainMessage(interaction.guild, state);
 
                 await cleanupSessionChannelMessages(interaction.guild, state);
 
